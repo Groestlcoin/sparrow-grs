@@ -24,7 +24,7 @@ import java.util.zip.InflaterInputStream;
 public class Electrum implements KeystoreFileImport, WalletImport, WalletExport {
     @Override
     public String getName() {
-        return "Electrum";
+        return "Electrum-GRS";
     }
 
     @Override
