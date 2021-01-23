@@ -50,9 +50,9 @@ public class NewWalletTransactionsEvent {
         }
 
         if(unit == BitcoinUnit.BTC) {
-            return CoinLabel.getBTCFormat().format((double) value / Transaction.SATOSHIS_PER_BITCOIN) + " BTC";
+            return CoinLabel.getBTCFormat().format((double) value / Transaction.SATOSHIS_PER_BITCOIN) + " GRS";
         }
 
-        return String.format(Locale.ENGLISH, "%,d", value) + " sats";
+        return String.format(Locale.ENGLISH, "%,d", value) + " gros";
     }
 }

@@ -608,7 +608,7 @@ public class SendController extends WalletFormController implements Initializabl
     }
 
     private void setFeeRate(Double feeRateAmt) {
-        feeRate.setText(String.format("%.2f", feeRateAmt) + " sats/vByte");
+        feeRate.setText(String.format("%.2f", feeRateAmt) + " gros/vByte");
     }
 
     private Node getSliderThumb() {

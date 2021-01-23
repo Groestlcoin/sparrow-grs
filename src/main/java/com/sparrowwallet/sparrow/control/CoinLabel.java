@@ -58,8 +58,8 @@ public class CoinLabel extends CopyableLabel {
         setTooltip(tooltip);
         setContextMenu(contextMenu);
 
-        String satsValue = String.format(Locale.ENGLISH, "%,d", value) + " sats";
-        String btcValue = BTC_FORMAT.format(value.doubleValue() / Transaction.SATOSHIS_PER_BITCOIN) + " BTC";
+        String satsValue = String.format(Locale.ENGLISH, "%,d", value) + " gros";
+        String btcValue = BTC_FORMAT.format(value.doubleValue() / Transaction.SATOSHIS_PER_BITCOIN) + " GRS";
 
         BitcoinUnit unit = bitcoinUnit;
         if(unit == null || unit.equals(BitcoinUnit.AUTO)) {
@@ -85,7 +85,7 @@ public class CoinLabel extends CopyableLabel {
                 Clipboard.getSystemClipboard().setContent(content);
             });
 
-            MenuItem copyBtcValue = new MenuItem("Copy Value in BTC");
+            MenuItem copyBtcValue = new MenuItem("Copy Value in GRS");
             copyBtcValue.setOnAction(AE -> {
                 hide();
                 ClipboardContent content = new ClipboardContent();
