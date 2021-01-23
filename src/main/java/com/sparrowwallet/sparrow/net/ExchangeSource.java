@@ -66,14 +66,15 @@ public enum ExchangeSource {
     COINGECKO("Coingecko") {
         @Override
         public List<Currency> getSupportedCurrencies() {
-            return getRates().rates.entrySet().stream().filter(rate -> "fiat".equals(rate.getValue().type) && isValidISO4217Code(rate.getKey().toUpperCase()))
-                    .map(rate -> Currency.getInstance(rate.getKey().toUpperCase())).collect(Collectors.toList());
+            return getRates().market_data.current_price.entrySet().stream().filter(
+                rate -> isValidISO4217Code(rate.getKey().toUpperCase())
+            ).map(rate -> Currency.getInstance(rate.getKey().toUpperCase())).collect(Collectors.toList());
         }
 
         @Override
         public Double getExchangeRate(Currency currency) {
             String currencyCode = currency.getCurrencyCode();
-            OptionalDouble optRate = getRates().rates.entrySet().stream().filter(rate -> currencyCode.equalsIgnoreCase(rate.getKey())).mapToDouble(rate -> rate.getValue().value).findFirst();
+            OptionalDouble optRate = getRates().market_data.current_price.entrySet().stream().filter(rate -> currencyCode.equalsIgnoreCase(rate.getKey())).mapToDouble(rate -> rate.getValue()).findFirst();
             if(optRate.isPresent()) {
                 return optRate.getAsDouble();
             }
@@ -81,16 +82,16 @@ public enum ExchangeSource {
             return null;
         }
 
-        private CoinGeckoRates getRates() {
-            String url = "https://api.coingecko.com/api/v3/exchange_rates";
+        private CoinGeckoData getRates() {
+            String url = "https://api.coingecko.com/api/v3/coins/groestlcoin?tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false";
             Proxy proxy = getProxy();
 
             try(InputStream is = (proxy == null ? new URL(url).openStream() : new URL(url).openConnection(proxy).getInputStream()); Reader reader = new InputStreamReader(is, StandardCharsets.UTF_8)) {
                 Gson gson = new Gson();
-                return gson.fromJson(reader, CoinGeckoRates.class);
+                return gson.fromJson(reader, CoinGeckoData.class);
             } catch (Exception e) {
                 log.error("Error retrieving currency rates", e);
-                return new CoinGeckoRates();
+                return new CoinGeckoData();
             }
         }
     };
@@ -181,14 +182,11 @@ public enum ExchangeSource {
         Map<String, Double> rates;
     }
 
-    private static class CoinGeckoRates {
-        Map<String, CoinGeckoRate> rates = new LinkedHashMap<>();
+    private static class CoinGeckoMarketData {
+        Map<String, Double> current_price = new LinkedHashMap<>();
     }
 
-    private static class CoinGeckoRate {
-        String name;
-        String unit;
-        Double value;
-        String type;
+    private static class CoinGeckoData {
+        CoinGeckoMarketData market_data;
     }
 }
