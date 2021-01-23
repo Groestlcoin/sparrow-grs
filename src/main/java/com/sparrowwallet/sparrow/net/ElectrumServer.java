@@ -55,7 +55,7 @@ public class ElectrumServer {
 
                 if(Config.get().getServerType() == ServerType.BITCOIN_CORE) {
                     if(bwtElectrumServer == null) {
-                        throw new ServerConfigException("Could not connect to Bitcoin Core RPC");
+                        throw new ServerConfigException("Could not connect to Groestlcoin Core RPC");
                     }
                     electrumServer = bwtElectrumServer;
                 } else if(Config.get().getServerType() == ServerType.ELECTRUM_SERVER) {
@@ -65,16 +65,16 @@ public class ElectrumServer {
                 }
 
                 if(electrumServer == null) {
-                    throw new ServerConfigException("Electrum server URL not specified");
+                    throw new ServerConfigException("Electrum-GRS server URL not specified");
                 }
 
                 if(electrumServerCert != null && !electrumServerCert.exists()) {
-                    throw new ServerConfigException("Electrum server certificate file not found");
+                    throw new ServerConfigException("Electrum-GRS server certificate file not found");
                 }
 
                 Protocol protocol = Protocol.getProtocol(electrumServer);
                 if(protocol == null) {
-                    throw new ServerConfigException("Electrum server URL must start with " + Protocol.TCP.toUrlString() + " or " + Protocol.SSL.toUrlString());
+                    throw new ServerConfigException("Electrum-GRS server URL must start with " + Protocol.TCP.toUrlString() + " or " + Protocol.SSL.toUrlString());
                 }
 
                 HostAndPort server = protocol.getServerHostAndPort(electrumServer);
@@ -820,9 +820,9 @@ public class ElectrumServer {
 
                                 if(!bwt.isReady()) {
                                     if(bwtStartException != null && bwtStartException.getMessage().contains("Wallet file not specified")) {
-                                        throw new ServerException("Bitcoin Core requires Multi-Wallet to be enabled in the Server Preferences");
+                                        throw new ServerException("Groestlcoin Core requires Multi-Wallet to be enabled in the Server Preferences");
                                     } else {
-                                        throw new ServerException("Check if Bitcoin Core is running, and the authentication details are correct.");
+                                        throw new ServerException("Check if Groestlcoin Core is running, and the authentication details are correct.");
                                     }
                                 }
                             } catch(InterruptedException e) {

@@ -91,7 +91,7 @@ public class Bwt {
      */
     private void start(List<String> outputDescriptors, Integer rescanSince, Boolean forceRescan, Integer gapLimit, CallbackNotifier callback) {
         BwtConfig bwtConfig = new BwtConfig();
-        bwtConfig.network = Network.get() == Network.MAINNET ? "bitcoin" : Network.get().getName();
+        bwtConfig.network = Network.get() == Network.MAINNET ? "groestlcoin" : Network.get().getName();
 
         if(!outputDescriptors.isEmpty()) {
             bwtConfig.descriptors = outputDescriptors;
@@ -250,7 +250,7 @@ public class Bwt {
                                 Bwt.this.shutdown();
                                 terminating = false;
                             } else {
-                                Platform.runLater(() -> EventManager.get().post(new BwtBootStatusEvent("Connecting to Bitcoin Core node at " + Config.get().getCoreServer() + "...")));
+                                Platform.runLater(() -> EventManager.get().post(new BwtBootStatusEvent("Connecting to Groestlcoin Core node at " + Config.get().getCoreServer() + "...")));
                             }
                         }
 
@@ -276,9 +276,9 @@ public class Bwt {
 
                         @Override
                         public void onElectrumReady(String addr) {
-                            log.debug("Electrum ready");
+                            log.debug("Electrum-GRS ready");
                             if(!terminating) {
-                                Platform.runLater(() -> EventManager.get().post(new BwtElectrumReadyStatusEvent("Electrum server ready", addr)));
+                                Platform.runLater(() -> EventManager.get().post(new BwtElectrumReadyStatusEvent("Electrum-GRS server ready", addr)));
                             }
                         }
 

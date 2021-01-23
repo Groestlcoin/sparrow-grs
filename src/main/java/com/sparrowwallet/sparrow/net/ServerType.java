@@ -1,7 +1,7 @@
 package com.sparrowwallet.sparrow.net;
 
 public enum ServerType {
-    BITCOIN_CORE("Bitcoin Core"), ELECTRUM_SERVER("Electrum Server");
+    BITCOIN_CORE("Groestlcoin Core"), ELECTRUM_SERVER("Electrum-GRS Server");
 
     private final String name;
 

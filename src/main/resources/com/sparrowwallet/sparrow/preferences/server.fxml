@@ -35,12 +35,12 @@
                         <ToggleGroup fx:id="serverTypeToggleGroup" />
                     </toggleGroup>
                     <buttons>
-                        <ToggleButton text="Bitcoin Core" toggleGroup="$serverTypeToggleGroup">
+                        <ToggleButton text="Groestlcoin Core" toggleGroup="$serverTypeToggleGroup">
                             <userData>
                                 <ServerType fx:constant="BITCOIN_CORE"/>
                             </userData>
                         </ToggleButton>
-                        <ToggleButton text="Electrum Server" toggleGroup="$serverTypeToggleGroup">
+                        <ToggleButton text="Electrum-GRS Server" toggleGroup="$serverTypeToggleGroup">
                             <userData>
                                 <ServerType fx:constant="ELECTRUM_SERVER"/>
                             </userData>
@@ -52,7 +52,7 @@
     </Form>
 
     <Form fx:id="coreForm" GridPane.columnIndex="0" GridPane.rowIndex="1">
-        <Fieldset inputGrow="SOMETIMES" text="Bitcoin Core RPC">
+        <Fieldset inputGrow="SOMETIMES" text="Groestlcoin Core RPC">
             <Field text="URL:">
                 <TextField fx:id="coreHost" promptText="e.g. 127.0.0.1"/>
                 <TextField fx:id="corePort" promptText="e.g. 8332" prefWidth="80" />
@@ -89,7 +89,7 @@
                 <PasswordField fx:id="corePass"/>
             </Field>
             <Field text="Multi-Wallet:">
-                <UnlabeledToggleSwitch fx:id="coreMultiWallet"/> <HelpLabel helpText="Creates a new Bitcoin Core wallet with the following name (recommended to avoid conflicts)" />
+                <UnlabeledToggleSwitch fx:id="coreMultiWallet"/> <HelpLabel helpText="Creates a new Groestlcoin Core wallet with the following name (recommended to avoid conflicts)" />
             </Field>
             <Field text="Wallet Name:" styleClass="label-button">
                 <TextField fx:id="coreWallet"/>
@@ -98,7 +98,7 @@
     </Form>
 
     <Form fx:id="electrumForm" GridPane.columnIndex="0" GridPane.rowIndex="1">
-        <Fieldset inputGrow="SOMETIMES" text="Electrum Server">
+        <Fieldset inputGrow="SOMETIMES" text="Electrum-GRS Server">
             <Field text="URL:">
                 <TextField fx:id="electrumHost" promptText="e.g. 127.0.0.1"/>
                 <TextField fx:id="electrumPort" promptText="e.g. 50002" prefWidth="80" />

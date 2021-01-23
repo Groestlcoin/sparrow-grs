@@ -29,7 +29,7 @@
     </rowConstraints>
 
     <Form GridPane.columnIndex="0" GridPane.rowIndex="0">
-        <Fieldset inputGrow="SOMETIMES" text="Bitcoin" styleClass="wideLabelFieldSet">
+        <Fieldset inputGrow="SOMETIMES" text="Groestlcoin" styleClass="wideLabelFieldSet">
             <Field text="Display unit:">
                 <ComboBox fx:id="bitcoinUnit">
                     <items>
@@ -40,7 +40,7 @@
                         </FXCollections>
                     </items>
                 </ComboBox>
-                <HelpLabel helpText="Display unit for bitcoin amounts.\nAuto displays amounts over 1 BTC in BTC, and amounts under that in satoshis."/>
+                <HelpLabel helpText="Display unit for Groestlcoin amounts.\nAuto displays amounts over 1 GRS in GRS, and amounts under that in gros."/>
             </Field>
             <Field text="Fee rates source:">
                 <ComboBox fx:id="feeRatesSource">
@@ -52,7 +52,7 @@
                         </FXCollections>
                     </items>
                 </ComboBox>
-                <HelpLabel helpText="Recommended fee rates can be sourced from your connected Electrum server, or an external source."/>
+                <HelpLabel helpText="Recommended fee rates can be sourced from your connected Electrum-GRS server, or an external source."/>
             </Field>
         </Fieldset>
         <Fieldset inputGrow="SOMETIMES" text="Fiat" styleClass="wideLabelFieldSet">
@@ -64,7 +64,7 @@
                     <items>
                         <FXCollections fx:factory="observableArrayList">
                             <ExchangeSource fx:constant="NONE" />
-                            <ExchangeSource fx:constant="COINBASE" />
+                            <!--ExchangeSource fx:constant="COINBASE" /-->
                             <ExchangeSource fx:constant="COINGECKO" />
                         </FXCollections>
                     </items>

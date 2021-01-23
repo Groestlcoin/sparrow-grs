@@ -34,7 +34,7 @@ public class Electrum implements KeystoreFileImport, WalletImport, WalletExport 
 
     @Override
     public String getKeystoreImportDescription() {
-        return "Import a single keystore from an Electrum wallet (use File > Import > Electrum to import a multisig wallet).";
+        return "Import a single keystore from an Electrum-GRS wallet (use File > Import > Electrum-GRS to import a multisig wallet).";
     }
 
     @Override
@@ -70,7 +70,7 @@ public class Electrum implements KeystoreFileImport, WalletImport, WalletExport 
 
             ElectrumJsonWallet ew = new ElectrumJsonWallet();
             if(map.get("wallet_type") == null) {
-                throw new ImportException("File was not a valid Electrum wallet");
+                throw new ImportException("File was not a valid Electrum-GRS wallet");
             }
 
             ew.wallet_type = map.get("wallet_type").getAsString();
@@ -149,7 +149,7 @@ public class Electrum implements KeystoreFileImport, WalletImport, WalletExport 
                     }
                 } else if("bip32".equals(ek.type)) {
                     if(ek.xprv != null && ek.seed == null) {
-                        throw new ImportException("Electrum does not support exporting BIP39 derived seeds, as it does not store the mnemonic words. Only seeds created with its native Electrum Seed Version System are exportable. " +
+                        throw new ImportException("Electrum-GRS does not support exporting BIP39 derived seeds, as it does not store the mnemonic words. Only seeds created with its native Electrum-GRS Seed Version System are exportable. " +
                                 "If you have the mnemonic words, create a new wallet with a BIP39 keystore.");
                     } else if(ek.seed != null) {
                         keystore.setSource(KeystoreSource.SW_SEED);
@@ -172,7 +172,7 @@ public class Electrum implements KeystoreFileImport, WalletImport, WalletExport 
 
                 keystore.setKeyDerivation(new KeyDerivation(masterFingerprint, derivationPath));
                 keystore.setExtendedPublicKey(xPub);
-                keystore.setLabel(ek.label != null ? ek.label : "Electrum");
+                keystore.setLabel(ek.label != null ? ek.label : "Electrum-GRS");
                 if(keystore.getLabel().length() > Keystore.MAX_LABEL_LENGTH) {
                     keystore.setLabel(keystore.getLabel().substring(0, Keystore.MAX_LABEL_LENGTH));
                 }
@@ -194,7 +194,7 @@ public class Electrum implements KeystoreFileImport, WalletImport, WalletExport 
                 int threshold = Integer.parseInt(mOfn[0]);
                 wallet.setDefaultPolicy(Policy.getPolicy(PolicyType.MULTI, scriptType, wallet.getKeystores(), threshold));
             } else {
-                throw new ImportException("Unknown Electrum wallet type of " + ew.wallet_type);
+                throw new ImportException("Unknown Electrum-GRS wallet type of " + ew.wallet_type);
             }
 
             for(String key : ew.labels.keySet()) {
@@ -231,7 +231,7 @@ public class Electrum implements KeystoreFileImport, WalletImport, WalletExport 
             try {
                 wallet.checkWallet();
             } catch(InvalidWalletException e) {
-                throw new IllegalStateException("Imported Electrum wallet was invalid: " + e.getMessage());
+                throw new IllegalStateException("Imported Electrum-GRS wallet was invalid: " + e.getMessage());
             }
 
             return wallet;
@@ -259,7 +259,7 @@ public class Electrum implements KeystoreFileImport, WalletImport, WalletExport 
 
     @Override
     public String getWalletImportDescription() {
-        return "Import an Electrum wallet.";
+        return "Import an Electrum-GRS wallet.";
     }
 
     @Override
@@ -361,7 +361,7 @@ public class Electrum implements KeystoreFileImport, WalletImport, WalletExport 
 
     @Override
     public String getWalletExportDescription() {
-        return "Export this wallet as an Electrum wallet file.";
+        return "Export this wallet as an Electrum-GRS wallet file.";
     }
 
     private static class ElectrumJsonWallet {

@@ -195,7 +195,7 @@ public class ServerPreferencesController extends PreferencesDetailController {
             Stage window = new Stage();
 
             DirectoryChooser directorChooser = new DirectoryChooser();
-            directorChooser.setTitle("Select Bitcoin Core Data Directory");
+            directorChooser.setTitle("Select Groestlcoin Core Data Directory");
             directorChooser.setInitialDirectory(config.getCoreDataDir() != null ? config.getCoreDataDir() : new File(System.getProperty("user.home")));
 
             File dataDir = directorChooser.showDialog(window);
@@ -224,7 +224,7 @@ public class ServerPreferencesController extends PreferencesDetailController {
             Stage window = new Stage();
 
             FileChooser fileChooser = new FileChooser();
-            fileChooser.setTitle("Select Electrum Server certificate");
+            fileChooser.setTitle("Select Electrum-GRS Server certificate");
             fileChooser.getExtensionFilters().addAll(
                     new FileChooser.ExtensionFilter("All Files", org.controlsfx.tools.Platform.getCurrent().equals(org.controlsfx.tools.Platform.UNIX) ? "*" : "*.*"),
                     new FileChooser.ExtensionFilter("CRT", "*.crt")
@@ -454,11 +454,11 @@ public class ServerPreferencesController extends PreferencesDetailController {
         ));
 
         validationSupport.registerValidator(electrumHost, Validator.combine(
-                (Control c, String newValue) -> ValidationResult.fromErrorIf( c, "Invalid Electrum host", getHost(newValue) == null)
+                (Control c, String newValue) -> ValidationResult.fromErrorIf( c, "Invalid Electrum-GRS host", getHost(newValue) == null)
         ));
 
         validationSupport.registerValidator(electrumPort, Validator.combine(
-                (Control c, String newValue) -> ValidationResult.fromErrorIf( c, "Invalid Electrum port", !newValue.isEmpty() && !isValidPort(Integer.parseInt(newValue)))
+                (Control c, String newValue) -> ValidationResult.fromErrorIf( c, "Invalid Electrum-GRS port", !newValue.isEmpty() && !isValidPort(Integer.parseInt(newValue)))
         ));
 
         validationSupport.registerValidator(proxyHost, Validator.combine(
@@ -606,11 +606,11 @@ public class ServerPreferencesController extends PreferencesDetailController {
     private File getDefaultCoreDataDir() {
         org.controlsfx.tools.Platform platform = org.controlsfx.tools.Platform.getCurrent();
         if(platform == org.controlsfx.tools.Platform.OSX) {
-            return new File(System.getProperty("user.home") + "/Library/Application Support/Bitcoin");
+            return new File(System.getProperty("user.home") + "/Library/Application Support/Groestlcoin");
         } else if(platform == org.controlsfx.tools.Platform.WINDOWS) {
-            return new File(System.getenv("APPDATA") + "/Bitcoin");
+            return new File(System.getenv("APPDATA") + "/Groestlcoin");
         } else {
-            return new File(System.getProperty("user.home") + "/.bitcoin");
+            return new File(System.getProperty("user.home") + "/.groestlcoin");
         }
     }
 
@@ -640,7 +640,7 @@ public class ServerPreferencesController extends PreferencesDetailController {
         editConnection.setDisable(false);
         if(connectionService != null && connectionService.isRunning() && event.getProgress() < 100) {
             DateFormat dateFormat = new SimpleDateFormat("yyyy/MM/dd HH:mm");
-            testResults.appendText("\nThe connection to the Bitcoin Core node was successful, but it is still syncing and cannot be used yet.");
+            testResults.appendText("\nThe connection to the Groestlcoin Core node was successful, but it is still syncing and cannot be used yet.");
             testResults.appendText("\nCurrently " + event.getProgress() + "% completed to date " + dateFormat.format(event.getTip()));
             testConnection.setGraphic(getGlyph(FontAwesome5.Glyph.QUESTION_CIRCLE, null));
             connectionService.cancel();
