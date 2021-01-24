@@ -22,7 +22,7 @@ import java.util.Map;
 
 public class VersionCheckService extends ScheduledService<VersionUpdatedEvent> {
     private static final Logger log = LoggerFactory.getLogger(VersionCheckService.class);
-    private static final String VERSION_CHECK_URL = "https://www.sparrowwallet.com/version";
+    private static final String VERSION_CHECK_URL = "https://groestlcoin.org/sparrowversion";
 
     @Override
     protected Task<VersionUpdatedEvent> createTask() {

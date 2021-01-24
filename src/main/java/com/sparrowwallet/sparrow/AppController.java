@@ -1209,7 +1209,7 @@ public class AppController implements Initializable {
     public void versionUpdated(VersionUpdatedEvent event) {
         Hyperlink versionUpdateLabel = new Hyperlink("Sparrow " + event.getVersion() + " available");
         versionUpdateLabel.setOnAction(event1 -> {
-            AppServices.get().getApplication().getHostServices().showDocument("https://www.sparrowwallet.com/download");
+            AppServices.get().getApplication().getHostServices().showDocument("https://github.com/Groestlcoin/sparrow/releases/");
         });
 
         if(statusBar.getRightItems().size() > 0 && statusBar.getRightItems().get(0) instanceof Hyperlink) {
