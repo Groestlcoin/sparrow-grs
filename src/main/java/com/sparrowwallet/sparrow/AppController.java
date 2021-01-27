@@ -190,7 +190,7 @@ public class AppController implements Initializable {
 
                 if(tabs.getTabs().isEmpty()) {
                     Stage tabStage = (Stage)tabs.getScene().getWindow();
-                    tabStage.setTitle("Sparrow");
+                    tabStage.setTitle("Sparrow-GRS");
                 }
             }
         });

@@ -263,7 +263,7 @@ public class AppServices {
             Scene scene = new Scene(root);
             scene.getStylesheets().add(AppServices.class.getResource("app.css").toExternalForm());
 
-            stage.setTitle("Sparrow");
+            stage.setTitle("Sparrow-GRS");
             stage.setMinWidth(650);
             stage.setMinHeight(800);
             stage.setScene(scene);

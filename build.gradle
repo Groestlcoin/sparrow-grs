@@ -12,7 +12,7 @@ if(os.macOsX) {
     osName = "osx"
 }
 
-group "com.sparrowwallet"
+group "org.groestlcoin.sparrowwallet"
 version "${sparrowVersion}"
 
 repositories {
@@ -130,7 +130,7 @@ jlink {
 
     options = ['--strip-debug', '--compress', '2', '--no-header-files', '--no-man-pages', '--ignore-signing-information', '--exclude-files', '**.png']
     launcher {
-        name = 'sparrow'
+        name = 'sparrow-grs'
         jvmArgs = ["--add-opens=javafx.graphics/com.sun.javafx.css=org.controlsfx.controls",
                    "--add-opens=javafx.graphics/javafx.scene=org.controlsfx.controls",
                    "--add-opens=javafx.controls/com.sun.javafx.scene.control.behavior=org.controlsfx.controls",
@@ -152,8 +152,8 @@ jlink {
     }
     addExtraDependencies("javafx")
     jpackage {
-        imageName = "Sparrow"
-        installerName = "Sparrow"
+        imageName = "Sparrow-GRS"
+        installerName = "Sparrow-GRS"
         appVersion = "${sparrowVersion}"
         skipInstaller = os.macOsX
         imageOptions = []
