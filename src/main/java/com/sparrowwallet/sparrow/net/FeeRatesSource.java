@@ -23,8 +23,8 @@ public enum FeeRatesSource {
         public Map<Integer, Double> getBlockTargetFeeRates(Map<Integer, Double> defaultblockTargetFeeRates) {
             return Collections.emptyMap();
         }
-    },
-    MEMPOOL_SPACE("mempool.space") {
+    };//,
+    /*MEMPOOL_SPACE("mempool.space") {
         @Override
         public Map<Integer, Double> getBlockTargetFeeRates(Map<Integer, Double> defaultblockTargetFeeRates) {
             String url = "https://mempool.space/api/v1/fees/recommended";
@@ -37,7 +37,7 @@ public enum FeeRatesSource {
             String url = "https://bitcoinfees.earn.com/api/v1/fees/recommended";
             return getThreeTierFeeRates(defaultblockTargetFeeRates, url);
         }
-    };
+    };*/
 
     private static final Logger log = LoggerFactory.getLogger(FeeRatesSource.class);
 

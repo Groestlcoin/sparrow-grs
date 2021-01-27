@@ -633,7 +633,7 @@ public class ElectrumServer {
             }
 
             FeeRatesSource feeRatesSource = Config.get().getFeeRatesSource();
-            feeRatesSource = (feeRatesSource == null ? FeeRatesSource.MEMPOOL_SPACE : feeRatesSource);
+            feeRatesSource = (feeRatesSource == null ? FeeRatesSource.ELECTRUM_SERVER : feeRatesSource);
             if(Network.get().equals(Network.MAINNET)) {
                 targetBlocksFeeRatesSats.putAll(feeRatesSource.getBlockTargetFeeRates(targetBlocksFeeRatesSats));
             }
