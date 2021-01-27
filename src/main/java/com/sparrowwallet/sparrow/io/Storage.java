@@ -35,8 +35,8 @@ public class Storage {
 
     private static final DateFormat BACKUP_DATE_FORMAT = new SimpleDateFormat("yyyyMMddHHmmss");
 
-    public static final String SPARROW_DIR = ".sparrow";
-    public static final String WINDOWS_SPARROW_DIR = "Sparrow";
+    public static final String SPARROW_DIR = ".sparrow-grs";
+    public static final String WINDOWS_SPARROW_DIR = "Sparrow-GRS";
     public static final String WALLETS_DIR = "wallets";
     public static final String WALLETS_BACKUP_DIR = "backup";
     public static final String HEADER_MAGIC_1 = "SPRW1";
