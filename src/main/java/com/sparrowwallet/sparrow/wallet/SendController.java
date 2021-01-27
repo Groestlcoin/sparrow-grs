@@ -337,6 +337,12 @@ public class SendController extends WalletFormController implements Initializabl
             transactionDiagram.update(walletTransaction);
             createButton.setDisable(walletTransaction == null || isInsufficientFeeRate());
         });
+
+        transactionDiagram.sceneProperty().addListener((observable, oldScene, newScene) -> {
+            if(oldScene == null && newScene != null) {
+                transactionDiagram.update(null);
+            }
+        });
     }
 
     private void initializeTabHeader(int count) {

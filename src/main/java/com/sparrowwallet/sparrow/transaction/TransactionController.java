@@ -64,6 +64,7 @@ public class TransactionController implements Initializable {
 
     public void initializeView() {
         initializeTxTree();
+        transactionMasterDetail.setDividerPosition(0.82);
         transactionMasterDetail.setShowDetailNode(Config.get().isShowTransactionHex());
         txhex.setTransaction(getTransaction());
         highlightTxHex();
@@ -75,6 +76,12 @@ public class TransactionController implements Initializable {
         } else if(TransactionView.OUTPUT.equals(initialView) && initialIndex >= PageForm.PAGE_SIZE) {
             fetchOutputBlockTransactions(initialIndex, initialIndex + 1);
         }
+
+        transactionMasterDetail.sceneProperty().addListener((observable, oldScene, newScene) -> {
+            if(oldScene == null && newScene != null) {
+                transactionMasterDetail.setDividerPosition(AppServices.isReducedWindowHeight(transactionMasterDetail) ? 0.9 : 0.82);
+            }
+        });
     }
 
     private void initializeTxTree() {
