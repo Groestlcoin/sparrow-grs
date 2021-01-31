@@ -686,7 +686,11 @@ public class AppController implements Initializable {
     }
 
     private boolean attemptImportWallet(File file, SecureString password) {
-        List<WalletImport> walletImporters = List.of(new ColdcardSinglesig(), new ColdcardMultisig(), new Electrum(), new SpecterDesktop(), new CoboVaultSinglesig(), new CoboVaultMultisig());
+        List<WalletImport> walletImporters = List.of(new ColdcardSinglesig(), new ColdcardMultisig(),
+                new Electrum(),
+                new SpecterDesktop(),
+                new CoboVaultSinglesig(), new CoboVaultMultisig(),
+                new PassportSinglesig());
         for(WalletImport importer : walletImporters) {
             try(FileInputStream inputStream = new FileInputStream(file)) {
                 if(importer.isEncrypted(file) && password == null) {
@@ -1293,7 +1297,7 @@ public class AppController implements Initializable {
     public void bwtScanStatus(BwtScanStatusEvent event) {
         serverToggle.setDisable(true);
         if((AppServices.isConnecting() || AppServices.isConnected()) && !event.isCompleted()) {
-            statusUpdated(new StatusEvent("Scanning... (" + event.getProgress() + "% complete" + (event.getProgress() > 30 ? ", " + event.getRemainingAsString() + " remaining)" : ")")));
+            statusUpdated(new StatusEvent("Scanning... (" + event.getProgress() + "% complete, " + event.getRemainingAsString() + " remaining)"));
             if(event.getProgress() > 0 && (statusTimeline == null || statusTimeline.getStatus() != Animation.Status.RUNNING)) {
                 statusBar.setProgress((double)event.getProgress() / 100);
             }
