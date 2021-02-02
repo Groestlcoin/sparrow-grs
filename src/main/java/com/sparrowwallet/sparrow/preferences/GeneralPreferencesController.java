@@ -82,7 +82,7 @@ public class GeneralPreferencesController extends PreferencesDetailController {
         if(config.getExchangeSource() != null) {
             exchangeSource.setValue(config.getExchangeSource());
         } else {
-            exchangeSource.getSelectionModel().select(2);
+            exchangeSource.getSelectionModel().select(0);
             config.setExchangeSource(exchangeSource.getValue());
         }
 

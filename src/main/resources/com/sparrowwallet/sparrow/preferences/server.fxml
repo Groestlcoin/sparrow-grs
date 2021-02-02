@@ -55,7 +55,7 @@
         <Fieldset inputGrow="SOMETIMES" text="Groestlcoin Core RPC">
             <Field text="URL:">
                 <TextField fx:id="coreHost" promptText="e.g. 127.0.0.1"/>
-                <TextField fx:id="corePort" promptText="e.g. 8332" prefWidth="80" />
+                <TextField fx:id="corePort" promptText="e.g. 1441" prefWidth="80" />
             </Field>
             <Field text="Authentication:">
                 <SegmentedButton>
@@ -100,7 +100,7 @@
     <Form fx:id="electrumForm" GridPane.columnIndex="0" GridPane.rowIndex="1">
         <Fieldset inputGrow="SOMETIMES" text="Electrum-GRS Server">
             <Field text="URL:">
-                <TextField fx:id="electrumHost" promptText="e.g. 127.0.0.1"/>
+                <TextField fx:id="electrumHost" promptText="e.g. electrum1.groestlcoin.org"/>
                 <TextField fx:id="electrumPort" promptText="e.g. 50002" prefWidth="80" />
             </Field>
             <Field text="Use SSL:">

@@ -1,6 +1,6 @@
 # Sparrow Groestlcoin Wallet
 
-Sparrow is a modern desktop Bitcoin wallet application supporting most hardware wallets and built on common standards such as PSBT, with an emphasis on transparency and usability.
+Sparrow-GRS is a modern desktop Bitcoin wallet application supporting most hardware wallets and built on common standards such as PSBT, with an emphasis on transparency and usability.
 
 More information (and release binaries) can be found at https://groestlcoin.org. Release binaries are also available directly from [Github](https://github.com/Groestlcoin/sparrow/releases).
 
@@ -8,7 +8,7 @@ More information (and release binaries) can be found at https://groestlcoin.org.
 
 ## Building
 
-To clone this project, use 
+To clone this project, use
 
 `git clone --recursive git@github.com:sparrowwallet/sparrow.git`
 
@@ -68,17 +68,17 @@ Testnet and regtest configurations (along with their wallets) are stored in subf
 
 ## Reporting Issues
 
-Please use the [Issues](https://github.com/Groestlcoin/sparrow/issues) tab above to report an issue. If possible, look in the sparrow.log file in the configuration directory for information helpful in debugging. 
+Please use the [Issues](https://github.com/Groestlcoin/sparrow/issues) tab above to report an issue. If possible, look in the sparrow-grs.log file in the configuration directory for information helpful in debugging.
 
 ## License
 
-Sparrow is licensed under the Apache 2 software licence.
+Sparrow-GRS is licensed under the Apache 2 software licence.
 
 ## Credit
 
 ![Yourkit](https://www.yourkit.com/images/yklogo.png)
 
-Sparrow Wallet uses the [Yourkit Java Profiler](https://www.yourkit.com/java/profiler/) to profile and improve performance. 
+Sparrow Wallet uses the [Yourkit Java Profiler](https://www.yourkit.com/java/profiler/) to profile and improve performance.
 YourKit supports open source projects with useful tools for monitoring and profiling Java and .NET applications.
 
 This project is forked from: https://github.com/sparrowwallet/sparrow/

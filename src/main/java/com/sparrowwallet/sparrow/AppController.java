@@ -383,7 +383,7 @@ public class AppController implements Initializable {
                 Platform.runLater(() -> {
                     Throwable e = failEvent.getSource().getException();
                     log.error("Error fetching transaction " + txId.toString(), e);
-                    showErrorDialog("Error fetching transaction", "The server returned an error when fetching the transaction. The server response is contained in sparrow.log");
+                    showErrorDialog("Error fetching transaction", "The server returned an error when fetching the transaction. The server response is contained in sparrow-grs.log");
                 });
             });
             transactionReferenceService.start();
@@ -1091,7 +1091,7 @@ public class AppController implements Initializable {
             String tabName = event.getTabName();
             if(tabs.getScene() != null) {
                 Stage tabStage = (Stage)tabs.getScene().getWindow();
-                tabStage.setTitle("Sparrow - " + tabName);
+                tabStage.setTitle("Sparrow-GRS - " + tabName);
             }
 
             if(event instanceof TransactionTabSelectedEvent) {
@@ -1176,7 +1176,7 @@ public class AppController implements Initializable {
 
             Image image = new Image("image/sparrow-small.png", 50, 50, false, false);
             Notifications notificationBuilder = Notifications.create()
-                    .title("Sparrow - " + event.getWallet().getName())
+                    .title("Sparrow-GRS - " + event.getWallet().getName())
                     .text(text)
                     .graphic(new ImageView(image))
                     .hideAfter(Duration.seconds(15))

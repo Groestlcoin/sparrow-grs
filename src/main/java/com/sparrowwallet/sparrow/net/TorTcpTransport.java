@@ -50,6 +50,6 @@ public class TorTcpTransport extends TcpTransport {
             EventManager.get().post(new TorStatusEvent(status));
         });
 
-        return new TorSocket(server.getHost(), server.getPort(), "sparrow");
+        return new TorSocket(server.getHost(), server.getPort(), "sparrow-grs");
     }
 }
