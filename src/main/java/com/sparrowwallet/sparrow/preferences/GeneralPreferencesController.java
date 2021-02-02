@@ -70,7 +70,7 @@ public class GeneralPreferencesController extends PreferencesDetailController {
         if(config.getFeeRatesSource() != null) {
             feeRatesSource.setValue(config.getFeeRatesSource());
         } else {
-            feeRatesSource.getSelectionModel().select(1);
+            feeRatesSource.getSelectionModel().select(0);
             config.setFeeRatesSource(feeRatesSource.getValue());
         }
 
