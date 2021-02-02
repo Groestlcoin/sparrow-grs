@@ -35,12 +35,12 @@
                         <ToggleGroup fx:id="serverTypeToggleGroup" />
                     </toggleGroup>
                     <buttons>
-                        <ToggleButton text="Groestlcoin Core" toggleGroup="$serverTypeToggleGroup">
+                        <!--ToggleButton text="Groestlcoin Core" toggleGroup="$serverTypeToggleGroup">
                             <userData>
                                 <ServerType fx:constant="BITCOIN_CORE"/>
                             </userData>
-                        </ToggleButton>
-                        <ToggleButton text="Electrum-GRS Server" toggleGroup="$serverTypeToggleGroup">
+                        </ToggleButton-->
+                        <ToggleButton text="Electrum-GRS Server" toggleGroup="$serverTypeToggleGroup" selected="true">
                             <userData>
                                 <ServerType fx:constant="ELECTRUM_SERVER"/>
                             </userData>
