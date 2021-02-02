@@ -1,8 +1,8 @@
-# Sparrow Bitcoin Wallet
+# Sparrow Groestlcoin Wallet
 
 Sparrow is a modern desktop Bitcoin wallet application supporting most hardware wallets and built on common standards such as PSBT, with an emphasis on transparency and usability.
 
-More information (and release binaries) can be found at https://sparrowwallet.com. Release binaries are also available directly from [Github](https://github.com/sparrowwallet/sparrow/releases).
+More information (and release binaries) can be found at https://groestlcoin.org. Release binaries are also available directly from [Github](https://github.com/Groestlcoin/sparrow/releases).
 
 ![Sparrow Wallet](https://sparrowwallet.com/assets/images/control-your-sends.png)
 
@@ -60,15 +60,15 @@ When not explicitly configured using the command line argument above, Sparrow st
 
 Platform | Location
 -------- | --------
-OSX      | ~/.sparrow
-Linux    | ~/.sparrow
-Windows  | %APPDATA%/Sparrow
+OSX      | ~/.sparrow-grs
+Linux    | ~/.sparrow-grs
+Windows  | %APPDATA%/Sparrow-GRS
 
 Testnet and regtest configurations (along with their wallets) are stored in subfolders to allow easy switching between networks.
 
 ## Reporting Issues
 
-Please use the [Issues](https://github.com/sparrowwallet/sparrow/issues) tab above to report an issue. If possible, look in the sparrow.log file in the configuration directory for information helpful in debugging. 
+Please use the [Issues](https://github.com/Groestlcoin/sparrow/issues) tab above to report an issue. If possible, look in the sparrow.log file in the configuration directory for information helpful in debugging. 
 
 ## License
 
@@ -80,3 +80,5 @@ Sparrow is licensed under the Apache 2 software licence.
 
 Sparrow Wallet uses the [Yourkit Java Profiler](https://www.yourkit.com/java/profiler/) to profile and improve performance. 
 YourKit supports open source projects with useful tools for monitoring and profiling Java and .NET applications.
+
+This project is forked from: https://github.com/sparrowwallet/sparrow/
