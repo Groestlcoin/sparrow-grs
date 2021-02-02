@@ -23,8 +23,8 @@ public class WelcomeDialog extends Dialog<Mode> {
 
         final DialogPane dialogPane = getDialogPane();
 
-        setTitle("Welcome to Sparrow");
-        dialogPane.setHeaderText("Welcome to Sparrow!");
+        setTitle("Welcome to Sparrow-GRS");
+        dialogPane.setHeaderText("Welcome to Sparrow-GRS!");
         dialogPane.getStylesheets().add(AppServices.class.getResource("app.css").toExternalForm());
         dialogPane.getStylesheets().add(AppServices.class.getResource("general.css").toExternalForm());
         AppServices.setStageIcon(dialogPane.getScene().getWindow());
@@ -45,10 +45,8 @@ public class WelcomeDialog extends Dialog<Mode> {
 
         final VBox content = new VBox(20);
         content.setPadding(new Insets(20, 20, 20, 20));
-        content.getChildren().add(createParagraph("Sparrow can operate in both an online and offline mode. In the online mode it connects to your Groestlcoin Core node or Electrum-GRS server to display transaction history. In the offline mode it is useful as a transaction editor and as an airgapped multisig coordinator."));
-        content.getChildren().add(createParagraph("Connecting Sparrow to your Groestlcoin Core node ensures your privacy, while connecting Sparrow to your own Electrum-GRS server ensures wallets load quicker, you have access to a full blockchain explorer, and your public keys are always encrypted on disk. Examples of Electrum servers include ElectrumX and electrs."));
-        content.getChildren().add(createParagraph("It's also possible to connect Sparrow to a public Electrum-GRS server (such as electrum.groestlcoin.org:50002) but this is not recommended as you will share your public key information with that server."));
-        content.getChildren().add(createParagraph("You can change your mode at any time using the toggle in the status bar. A blue toggle indicates you are connected to an Electrum-GRS server, while a green toggle indicates you are connected to a Groestlcoin Code node."));
+        content.getChildren().add(createParagraph("Sparrow-GRS can operate in both an online and offline mode. In the online mode it connects to Electrum-GRS server to display transaction history. In the offline mode it is useful as a transaction editor and as an airgapped multisig coordinator."));
+        content.getChildren().add(createParagraph("With Sparrow-GRS you have access to a full blockchain explorer and your public keys are always encrypted on disk. Examples of Electru-GRS servers include ElectrumX and electrs."));
         content.getChildren().add(createStatusBar(onlineButtonType, offlineButtonType));
 
         dialogPane.setContent(content);
