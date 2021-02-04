@@ -13,7 +13,7 @@
   <key>CFBundleIconFile</key>
   <string>Sparrow.icns</string>
   <key>CFBundleIdentifier</key>
-  <string>com.sparrowwallet.sparrow</string>
+  <string>org.groestlcoin.sparrow</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
