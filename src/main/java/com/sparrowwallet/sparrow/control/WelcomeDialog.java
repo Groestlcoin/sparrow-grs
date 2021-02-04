@@ -29,7 +29,7 @@ public class WelcomeDialog extends Dialog<Mode> {
         dialogPane.getStylesheets().add(AppServices.class.getResource("general.css").toExternalForm());
         AppServices.setStageIcon(dialogPane.getScene().getWindow());
         dialogPane.setPrefWidth(600);
-        dialogPane.setPrefHeight(520);
+        dialogPane.setPrefHeight(320);
 
         Image image = new Image("image/sparrow-small.png", 50, 50, false, false);
         if (!image.isError()) {
@@ -47,7 +47,7 @@ public class WelcomeDialog extends Dialog<Mode> {
         content.setPadding(new Insets(20, 20, 20, 20));
         content.getChildren().add(createParagraph("Sparrow-GRS can operate in both an online and offline mode. In the online mode it connects to Electrum-GRS server to display transaction history. In the offline mode it is useful as a transaction editor and as an airgapped multisig coordinator."));
         content.getChildren().add(createParagraph("With Sparrow-GRS you have access to a full blockchain explorer and your public keys are always encrypted on disk. Examples of Electru-GRS servers include ElectrumX and electrs."));
-        content.getChildren().add(createStatusBar(onlineButtonType, offlineButtonType));
+        //content.getChildren().add(createStatusBar(onlineButtonType, offlineButtonType));
 
         dialogPane.setContent(content);
 
