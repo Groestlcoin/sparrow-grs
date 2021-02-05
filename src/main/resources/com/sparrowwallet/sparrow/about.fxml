@@ -23,7 +23,10 @@
             <Label text="Sparrow-GRS is a Groestlcoin wallet with the goal of providing greater transparency and usability on the path to full financial self sovereignty. It attempts to provide all of the detail about your wallet setup, transactions and UTXOs so that you can transact will a full understanding of your money." wrapText="true" />
             <Label text="Sparrow-GRS can operate in both an online and offline mode. In the online mode it connects to Electrum-GRS server to display transaction history. In the offline mode it is useful as a transaction editor and as an airgapped multisig coordinator." wrapText="true" />
             <Label text="With Sparrow-GRS you have access to a full blockchain explorer and your public keys are always encrypted on disk. " wrapText="true" />
-            <HBox><Label text="You can find a list of Electrum-GRS servers and port numbers at "/><Hyperlink text="https://github.com/Groestlcoin/electrum-grs/blob/master/electrum_grs/servers.json" onAction="#openDonate"/></HBox>
+            <Label text="You can find a list of Electrum-GRS servers and port numbers at: "/>
+            <Hyperlink text="https://github.com/Groestlcoin/electrum-grs/blob/master/electrum_grs/servers.json" onAction="#openServers"/>
+            <Label text="You can donate here: "/>
+            <Hyperlink text="https://www.groestlcoin.org/donations/" onAction="#openDonate"/>
         </VBox>
         <HBox styleClass="button-area" alignment="BOTTOM_RIGHT" VBox.vgrow="SOMETIMES">
             <Button text="Done" onAction="#close" />
