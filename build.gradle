@@ -139,18 +139,18 @@ jlink {
                    "--add-opens=javafx.base/com.sun.javafx.event=org.controlsfx.controls",
                    "--add-opens=javafx.controls/javafx.scene.control.cell=com.sparrowwallet.sparrow",
                    "--add-opens=org.controlsfx.controls/impl.org.controlsfx.skin=com.sparrowwallet.sparrow",
-                   "--add-opens=javafx.graphics/com.sun.javafx.tk=com.sparrowwallet.merged.module",
-                   "--add-opens=javafx.graphics/com.sun.javafx.tk.quantum=com.sparrowwallet.merged.module",
-                   "--add-opens=javafx.graphics/com.sun.glass.ui=com.sparrowwallet.merged.module",
-                   "--add-opens=javafx.controls/com.sun.javafx.scene.control=com.sparrowwallet.merged.module",
-                   "--add-opens=javafx.graphics/com.sun.javafx.menu=com.sparrowwallet.merged.module",
+                   "--add-opens=javafx.graphics/com.sun.javafx.tk=org.groestlcoin.sparrowwallet.merged.module",
+                   "--add-opens=javafx.graphics/com.sun.javafx.tk.quantum=org.groestlcoin.sparrowwallet.merged.module",
+                   "--add-opens=javafx.graphics/com.sun.glass.ui=org.groestlcoin.sparrowwallet.merged.module",
+                   "--add-opens=javafx.controls/com.sun.javafx.scene.control=org.groestlcoin.sparrowwallet.merged.module",
+                   "--add-opens=javafx.graphics/com.sun.javafx.menu=org.groestlcoin.sparrowwallet.merged.module",
                    "--add-opens=javafx.graphics/com.sun.glass.ui=com.sparrowwallet.sparrow",
                    "--add-opens=javafx.graphics/com.sun.javafx.application=com.sparrowwallet.sparrow",
                    "--add-opens=java.base/java.net=com.sparrowwallet.sparrow",
-                   "--add-reads=com.sparrowwallet.merged.module=java.desktop"]
+                   "--add-reads=org.groestlcoin.sparrowwallet.merged.module=java.desktop"]
 
         if(os.macOsX) {
-            jvmArgs += "--add-opens=javafx.graphics/com.sun.glass.ui.mac=com.sparrowwallet.merged.module"
+            jvmArgs += "--add-opens=javafx.graphics/com.sun.glass.ui.mac=org.groestlcoin.sparrowwallet.merged.module"
         }
     }
     addExtraDependencies("javafx")
