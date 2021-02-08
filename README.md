@@ -10,7 +10,7 @@ More information (and release binaries) can be found at https://groestlcoin.org.
 
 To clone this project, use
 
-`git clone --recursive git@github.com:sparrowwallet/sparrow.git`
+`git clone --recursive https://github.com/Groestlcoin/sparrow`
 
 In order to build, Sparrow requires Java 14 to be installed. The release packages can be built using
 
