@@ -11,7 +11,7 @@
   <key>CFBundleExecutable</key>
   <string>Sparrow-GRS</string>
   <key>CFBundleIconFile</key>
-  <string>Sparrow-GRS.icns</string>
+  <string>sparrow.icns</string>
   <key>CFBundleIdentifier</key>
   <string>org.groestlcoin.sparrow</string>
   <key>CFBundleInfoDictionaryVersion</key>
