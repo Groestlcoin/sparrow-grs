@@ -9,15 +9,15 @@
   <key>CFBundleAllowMixedLocalizations</key>
   <true/>
   <key>CFBundleExecutable</key>
-  <string>Sparrow</string>
+  <string>Sparrow-GRS</string>
   <key>CFBundleIconFile</key>
-  <string>Sparrow.icns</string>
+  <string>Sparrow-GRS.icns</string>
   <key>CFBundleIdentifier</key>
   <string>org.groestlcoin.sparrow</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
-  <string>Sparrow</string>
+  <string>Sparrow-GRS</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
@@ -34,6 +34,6 @@
   <key>NSHighResolutionCapable</key>
   <string>true</string>
   <key>NSCameraUsageDescription</key>
-  <string>Sparrow requires access to the camera in order to scan QR codes</string>
+  <string>Sparrow-GRS requires access to the camera in order to scan QR codes</string>
  </dict>
 </plist>
