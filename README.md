@@ -1,10 +1,8 @@
 # Sparrow Groestlcoin Wallet
 
-Sparrow-GRS is a modern desktop Bitcoin wallet application supporting most hardware wallets and built on common standards such as PSBT, with an emphasis on transparency and usability.
+Sparrow-GRS is a modern desktop Groestlcoin wallet application supporting most hardware wallets and built on common standards such as PSBT, with an emphasis on transparency and usability.
 
 More information (and release binaries) can be found at https://groestlcoin.org. Release binaries are also available directly from [Github](https://github.com/Groestlcoin/sparrow/releases).
-
-![Sparrow Wallet](https://sparrowwallet.com/assets/images/control-your-sends.png)
 
 ## Building
 
@@ -54,7 +52,7 @@ As a fallback, the network (mainnet, testnet or regtest) can also be set using a
 
 A final fallback which can be useful when running the Sparrow binary is to create a file called ``network-testnet`` in the Sparrow home folder (see below) to configure the testnet network.
 
-Note that if you are connecting to an Electrum server when using testnet, that server will need to running on testnet configuration as well.
+Note that if you are connecting to an Electrum-GRS server when using testnet, that server will need to running on testnet configuration as well.
 
 When not explicitly configured using the command line argument above, Sparrow stores its mainnet config file, log file and wallets in a home folder location appropriate to the operating system:
 
@@ -78,7 +76,7 @@ Sparrow-GRS is licensed under the Apache 2 software licence.
 
 ![Yourkit](https://www.yourkit.com/images/yklogo.png)
 
-Sparrow Wallet uses the [Yourkit Java Profiler](https://www.yourkit.com/java/profiler/) to profile and improve performance.
+Sparrow Groestlcoin Wallet uses the [Yourkit Java Profiler](https://www.yourkit.com/java/profiler/) to profile and improve performance.
 YourKit supports open source projects with useful tools for monitoring and profiling Java and .NET applications.
 
 This project is forked from: https://github.com/sparrowwallet/sparrow/
