@@ -1,19 +1,19 @@
 name: Package
 
-on: workflow_dispatch
+on: [push, pull_request]
 
 jobs:
   build:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        os: [windows-latest, ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
         with:
           submodules: true
       - name: Set up JDK 15.0.2
-        if: ${{ runner.os == 'Linux' }}
+        if: ${{ runner.os == 'Linux' || runner.os == 'macOS' }}
         uses: joschi/setup-jdk@v2
         with:
           java-version: 15
@@ -25,7 +25,7 @@ jobs:
       - name: Show Build Versions
         run: ./gradlew -v
       - name: Cache Gradle packages
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           path: ~/.gradle/caches
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle') }}

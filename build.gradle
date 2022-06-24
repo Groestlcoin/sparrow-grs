@@ -128,7 +128,7 @@ jlink {
         requires 'java.management'
     }
 
-    options = ['--strip-debug', '--compress', '1', '--no-header-files', '--no-man-pages', '--ignore-signing-information', '--exclude-files', '**.png']
+    options = ['--strip-debug', '--compress', '2', '--no-header-files', '--no-man-pages', '--ignore-signing-information', '--exclude-files', '**.png']
     launcher {
         name = 'sparrow-grs'
         jvmArgs = ["--add-opens=javafx.graphics/com.sun.javafx.css=org.controlsfx.controls",
