@@ -259,25 +259,25 @@ jlink {
 }
 
 task removeGroupWritePermission(type: Exec) {
-    commandLine 'chmod', '-R', 'g-w', "$buildDir/jpackage/Sparrow"
+    commandLine 'chmod', '-R', 'g-w', "$buildDir/jpackage/Sparrow-GRS"
 }
 
 task packageZipDistribution(type: Zip) {
-    archiveFileName = "Sparrow-${sparrowVersion}.zip"
+    archiveFileName = "Sparrow-GRS-${sparrowVersion}.zip"
     destinationDirectory = file("$buildDir/jpackage")
     from("$buildDir/jpackage/") {
-        include "Sparrow/**"
-        include "Sparrow.app/**"
+        include "Sparrow-GRS/**"
+        include "Sparrow-GRS.app/**"
     }
 }
 
 task packageTarDistribution(type: Tar) {
     dependsOn removeGroupWritePermission
-    archiveFileName = "sparrow-${sparrowVersion}-${releaseArch}.tar.gz"
+    archiveFileName = "sparrow-grs-${sparrowVersion}-${releaseArch}.tar.gz"
     destinationDirectory = file("$buildDir/jpackage")
     compression = Compression.GZIP
     from("$buildDir/jpackage/") {
-        include "Sparrow/**"
+        include "Sparrow-GRS/**"
     }
 }
 
