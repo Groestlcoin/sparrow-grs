@@ -29,7 +29,7 @@
             <Hyperlink text="https://www.groestlcoin.org/donations/" onAction="#openDonate"/>
         </VBox>
         <HBox styleClass="button-area" alignment="BOTTOM_RIGHT" VBox.vgrow="SOMETIMES">
-            <Button text="Done" onAction="#close" />
+            <Button text="Close" onAction="#close" />
         </HBox>
     </VBox>
 </StackPane>

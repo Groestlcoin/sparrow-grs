@@ -1,6 +1,6 @@
 name: Package
 
-on: [push, pull_request]
+on: workflow_dispatch
 
 jobs:
   build:
@@ -12,28 +12,42 @@ jobs:
       - uses: actions/checkout@v3
         with:
           submodules: true
-      - name: Set up JDK 15.0.2
-        if: ${{ runner.os == 'Linux' || runner.os == 'macOS' }}
-        uses: joschi/setup-jdk@v2
+      - name: Set up JDK 18.0.1
+        uses: actions/setup-java@v3
         with:
-          java-version: 15
-      - name: Set up JDK 14.0.2
-        if: ${{ runner.os == 'Windows' }}
-        uses: actions/setup-java@v1
-        with:
-          java-version: 14.0.2
+          distribution: 'temurin'
+          java-version: '18.0.1'
       - name: Show Build Versions
         run: ./gradlew -v
-      - name: Cache Gradle packages
-        uses: actions/cache@v3
-        with:
-          path: ~/.gradle/caches
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle') }}
-          restore-keys: ${{ runner.os }}-gradle
       - name: Build with Gradle
         run: ./gradlew jpackage
+      - name: Package zip distribution
+        if: ${{ runner.os == 'Windows' || runner.os == 'macOS' }}
+        run: ./gradlew packageZipDistribution
+      - name: Package tar distribution
+        if: ${{ runner.os == 'Linux' }}
+        run: ./gradlew packageTarDistribution
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: Sparrow-GRS Build - ${{ runner.os }}
-          path: build/jpackage/*
+          path: |
+            build/jpackage/*
+            !build/jpackage/Sparrow/
+      - name: Headless build with Gradle
+        if: ${{ runner.os == 'Linux' }}
+        run: ./gradlew -Djava.awt.headless=true clean jpackage
+      - name: Package headless tar distribution
+        if: ${{ runner.os == 'Linux' }}
+        run: ./gradlew -Djava.awt.headless=true packageTarDistribution
+      - name: Rename Headless Artifacts
+        if: ${{ runner.os == 'Linux' }}
+        run: for f in build/jpackage/sparrow*; do mv -v "$f" "${f/sparrow/sparrow-server}"; done;
+      - name: Upload Headless Artifact
+        if: ${{ runner.os == 'Linux' }}
+        uses: actions/upload-artifact@v3
+        with:
+          name: Sparrow Build - ${{ runner.os }} Headless
+          path: |
+            build/jpackage/*
+            !build/jpackage/Sparrow/

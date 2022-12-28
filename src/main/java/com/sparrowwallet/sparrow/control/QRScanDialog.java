@@ -1,8 +1,6 @@
 package com.sparrowwallet.sparrow.control;
 
-import com.github.sarxos.webcam.WebcamEvent;
-import com.github.sarxos.webcam.WebcamListener;
-import com.github.sarxos.webcam.WebcamResolution;
+import com.github.sarxos.webcam.*;
 import com.sparrowwallet.drongo.ExtendedKey;
 import com.sparrowwallet.drongo.KeyDerivation;
 import com.sparrowwallet.drongo.OutputDescriptor;
@@ -16,8 +14,10 @@ import com.sparrowwallet.drongo.protocol.Base43;
 import com.sparrowwallet.drongo.protocol.ScriptType;
 import com.sparrowwallet.drongo.protocol.Transaction;
 import com.sparrowwallet.drongo.psbt.PSBT;
+import com.sparrowwallet.drongo.psbt.PSBTParseException;
 import com.sparrowwallet.drongo.uri.BitcoinURI;
-import com.sparrowwallet.drongo.wallet.Keystore;
+import com.sparrowwallet.drongo.wallet.DeterministicSeed;
+import com.sparrowwallet.drongo.wallet.SeedQR;
 import com.sparrowwallet.drongo.wallet.Wallet;
 import com.sparrowwallet.hummingbird.LegacyURDecoder;
 import com.sparrowwallet.hummingbird.registry.*;
@@ -28,13 +28,18 @@ import com.sparrowwallet.sparrow.AppServices;
 import com.sparrowwallet.sparrow.glyphfont.FontAwesome5;
 import com.sparrowwallet.sparrow.io.Config;
 import javafx.application.Platform;
+import javafx.beans.property.DoubleProperty;
 import javafx.beans.property.ObjectProperty;
+import javafx.beans.property.SimpleDoubleProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.value.ChangeListener;
 import javafx.beans.value.ObservableValue;
+import javafx.geometry.Insets;
 import javafx.scene.Node;
 import javafx.scene.control.*;
-import javafx.scene.layout.StackPane;
+import javafx.scene.layout.*;
+import javafx.util.Duration;
+import javafx.util.StringConverter;
 import org.controlsfx.glyphfont.Glyph;
 import org.controlsfx.tools.Borders;
 import org.slf4j.Logger;
@@ -59,12 +64,16 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
     private final WebcamService webcamService;
     private List<String> parts;
 
-    private boolean isUr;
     private QRScanDialog.Result result;
 
     private static final Pattern PART_PATTERN = Pattern.compile("p(\\d+)of(\\d+) (.+)");
 
+    private static final int SCAN_PERIOD_MILLIS = 100;
     private final ObjectProperty<WebcamResolution> webcamResolutionProperty = new SimpleObjectProperty<>(WebcamResolution.VGA);
+
+    private final DoubleProperty percentComplete = new SimpleDoubleProperty(0.0);
+
+    private final ObjectProperty<WebcamDevice> webcamDeviceProperty = new SimpleObjectProperty<>();
 
     public QRScanDialog() {
         this.decoder = new URDecoder();
@@ -74,7 +83,9 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
             webcamResolutionProperty.set(WebcamResolution.HD);
         }
 
-        this.webcamService = new WebcamService(webcamResolutionProperty.get(), new QRScanListener());
+        this.webcamService = new WebcamService(webcamResolutionProperty.get(), null, new QRScanListener(), new ScanDelayCalculator());
+        webcamService.setPeriod(Duration.millis(SCAN_PERIOD_MILLIS));
+        webcamService.setRestartOnFailure(false);
         WebcamView webcamView = new WebcamView(webcamService);
 
         final DialogPane dialogPane = new QRScanDialogPane();
@@ -83,12 +94,51 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
 
         StackPane stackPane = new StackPane();
         stackPane.getChildren().add(webcamView.getView());
+        Node wrappedView = Borders.wrap(stackPane).lineBorder().buildAll();
 
-        dialogPane.setContent(Borders.wrap(stackPane).lineBorder().buildAll());
+        ProgressBar progressBar = new ProgressBar();
+        progressBar.setMinHeight(20);
+        progressBar.setPadding(new Insets(0, 10, 0, 10));
+        progressBar.setPrefWidth(Integer.MAX_VALUE);
+        progressBar.progressProperty().bind(percentComplete);
+        webcamService.openingProperty().addListener((observable, oldValue, newValue) -> {
+            if(percentComplete.get() <= 0.0) {
+                Platform.runLater(() -> percentComplete.set(newValue ? 0.0 : -1.0));
+            }
+            Platform.runLater(() -> {
+                if(Config.get().getWebcamDevice() != null && webcamDeviceProperty.get() == null) {
+                    for(WebcamDevice device : WebcamScanDriver.getFoundDevices()) {
+                        if(device.getName().equals(Config.get().getWebcamDevice())) {
+                            webcamDeviceProperty.set(device);
+                        }
+                    }
+                }
+            });
+        });
+
+        VBox vBox = new VBox(20);
+        vBox.getChildren().addAll(wrappedView, progressBar);
+
+        dialogPane.setContent(vBox);
 
         webcamService.resultProperty().addListener(new QRResultListener());
         webcamService.setOnFailed(failedEvent -> {
-            Platform.runLater(() -> setResult(new Result(failedEvent.getSource().getException())));
+            Throwable exception = failedEvent.getSource().getException();
+
+            Throwable nested = exception;
+            while(nested.getCause() != null) {
+                nested = nested.getCause();
+            }
+            if(org.controlsfx.tools.Platform.getCurrent() == org.controlsfx.tools.Platform.WINDOWS &&
+                    nested.getMessage().startsWith("Library 'OpenIMAJGrabber' was not loaded successfully from file")) {
+                exception = new WebcamDependencyException("Your system is missing a dependency required for the webcam. Follow the link below for more details.\n\n[https://sparrowwallet.com/docs/faq.html#your-system-is-missing-a-dependency-for-the-webcam]", exception);
+            } else if(nested.getMessage().startsWith("Cannot start native grabber") && Config.get().getWebcamDevice() != null) {
+                exception = new WebcamOpenException("Cannot open configured webcam " + Config.get().getWebcamDevice() + ", reverting to the default webcam");
+                Config.get().setWebcamDevice(null);
+            }
+
+            final Throwable result = exception;
+            Platform.runLater(() -> setResult(new Result(result)));
         });
         webcamService.start();
         webcamResolutionProperty.addListener((observable, oldValue, newResolution) -> {
@@ -96,6 +146,12 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
                 setHeight(newResolution == WebcamResolution.HD ? (getHeight() - 100) : (getHeight() + 100));
             }
             webcamService.cancel();
+        });
+        webcamDeviceProperty.addListener((observable, oldValue, newValue) -> {
+            Config.get().setWebcamDevice(newValue.getName());
+            if(!Objects.equals(webcamService.getDevice(), newValue)) {
+                webcamService.cancel();
+            }
         });
 
         setOnCloseRequest(event -> {
@@ -109,9 +165,11 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
 
         final ButtonType cancelButtonType = new javafx.scene.control.ButtonType("Cancel", ButtonBar.ButtonData.CANCEL_CLOSE);
         final ButtonType hdButtonType = new javafx.scene.control.ButtonType("Use HD Capture", ButtonBar.ButtonData.LEFT);
-        dialogPane.getButtonTypes().addAll(hdButtonType, cancelButtonType);
+        final ButtonType camButtonType = new javafx.scene.control.ButtonType("Default Camera", ButtonBar.ButtonData.HELP_2);
+        dialogPane.getButtonTypes().addAll(hdButtonType, camButtonType, cancelButtonType);
         dialogPane.setPrefWidth(646);
-        dialogPane.setPrefHeight(webcamResolutionProperty.get() == WebcamResolution.HD ? 450 : 550);
+        dialogPane.setPrefHeight(webcamResolutionProperty.get() == WebcamResolution.HD ? 490 : 590);
+        AppServices.moveToActiveWindowScreen(this);
 
         setResultConverter(dialogButton -> dialogButton != cancelButtonType ? result : null);
     }
@@ -127,11 +185,10 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
             String qrtext = qrResult.getText();
             Matcher partMatcher = PART_PATTERN.matcher(qrtext);
 
-            if(isUr || qrtext.toLowerCase().startsWith(UR.UR_PREFIX)) {
-                isUr = true;
-
+            if(qrtext.toLowerCase(Locale.ROOT).startsWith(UR.UR_PREFIX)) {
                 if(LegacyURDecoder.isLegacyURFragment(qrtext)) {
-                    legacyDecoder.receivePart(qrtext.toLowerCase());
+                    legacyDecoder.receivePart(qrtext);
+                    Platform.runLater(() -> percentComplete.setValue(legacyDecoder.getPercentComplete()));
 
                     if(legacyDecoder.isComplete()) {
                         try {
@@ -143,6 +200,7 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
                     }
                 } else {
                     decoder.receivePart(qrtext);
+                    Platform.runLater(() -> percentComplete.setValue(decoder.getProcessedPartsCount() > 0 ? decoder.getEstimatedPercentComplete() : 0));
 
                     if(decoder.getResult() != null) {
                         URDecoder.Result urResult = decoder.getResult();
@@ -164,12 +222,20 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
                 }
                 parts.set(m - 1, payload);
 
+                if(n > 0) {
+                    Platform.runLater(() -> percentComplete.setValue((double)parts.stream().filter(Objects::nonNull).count() / n));
+                }
+
                 if(parts.stream().filter(Objects::nonNull).count() == n) {
                     String complete = String.join("", parts);
                     try {
-                        PSBT psbt = PSBT.fromString(complete);
+                        PSBT psbt = PSBT.fromString(complete, false);
                         result = new Result(psbt);
                         return;
+                    } catch(PSBTParseException e) {
+                        if(PSBT.isPSBT(complete)) {
+                            log.error("Error parsing PSBT", e);
+                        }
                     } catch(Exception e) {
                         //ignore, bytes not parsable as PSBT
                     }
@@ -182,7 +248,7 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
                         //ignore, bytes not parsable as tx
                     }
 
-                    result = new Result(new ScanException("Parsed QR parts were not a PSBT or transaction"));
+                    result = new Result(complete);
                 }
             } else {
                 PSBT psbt;
@@ -190,6 +256,7 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
                 BitcoinURI bitcoinURI;
                 Address address;
                 ExtendedKey extendedKey;
+                DeterministicSeed seed;
                 try {
                     extendedKey = ExtendedKey.fromDescriptor(qrtext);
                     result = new Result(extendedKey);
@@ -215,15 +282,19 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
                 }
 
                 try {
-                    psbt = PSBT.fromString(qrtext);
+                    psbt = PSBT.fromString(qrtext, false);
                     result = new Result(psbt);
                     return;
+                } catch(PSBTParseException e) {
+                    if(PSBT.isPSBT(qrtext)) {
+                        log.error("Error parsing PSBT", e);
+                    }
                 } catch(Exception e) {
                     //Ignore, not parseable as Base64 or hex
                 }
 
                 try {
-                    psbt = new PSBT(qrResult.getRawBytes());
+                    psbt = new PSBT(qrResult.getRawBytes(), false);
                     result = new Result(psbt);
                     return;
                 } catch(Exception e) {
@@ -248,7 +319,7 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
 
                 //Try Base43 used by Electrum
                 try {
-                    psbt = new PSBT(Base43.decode(qrtext));
+                    psbt = new PSBT(Base43.decode(qrtext), false);
                     result = new Result(psbt);
                     return;
                 } catch(Exception e) {
@@ -263,6 +334,22 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
                     //Ignore, not parseable as base43 decoded bytes
                 }
 
+                try {
+                    seed = SeedQR.getSeed(qrtext);
+                    result = new Result(seed);
+                    return;
+                } catch(Exception e) {
+                    //Ignore, not parseable as a SeedQR
+                }
+
+                try {
+                    seed = SeedQR.getSeed(qrResult.getRawBytes());
+                    result = new Result(seed);
+                    return;
+                } catch(Exception e) {
+                    //Ignore, not parseable as a CompactSeedQR
+                }
+
                 result = new Result(qrtext);
             }
         }
@@ -274,8 +361,12 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
                 if(urRegistryType.equals(RegistryType.BYTES)) {
                     byte[] urBytes = (byte[])ur.decodeFromRegistry();
                     try {
-                        PSBT psbt = new PSBT(urBytes);
+                        PSBT psbt = new PSBT(urBytes, false);
                         return new Result(psbt);
+                    } catch(PSBTParseException e) {
+                        if(PSBT.isPSBT(urBytes)) {
+                            log.error("Error parsing PSBT", e);
+                        }
                     } catch(Exception e) {
                         //ignore, bytes not parsable as PSBT
                     }
@@ -300,7 +391,7 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
                 } else if(urRegistryType.equals(RegistryType.CRYPTO_PSBT)) {
                     CryptoPSBT cryptoPSBT = (CryptoPSBT)ur.decodeFromRegistry();
                     try {
-                        PSBT psbt = new PSBT(cryptoPSBT.getPsbt());
+                        PSBT psbt = new PSBT(cryptoPSBT.getPsbt(), false);
                         return new Result(psbt);
                     } catch(Exception e) {
                         log.error("Error parsing PSBT from UR type " + urRegistryType, e);
@@ -326,6 +417,14 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
                     CryptoAccount cryptoAccount = (CryptoAccount)ur.decodeFromRegistry();
                     List<Wallet> wallets = getWallets(cryptoAccount);
                     return new Result(wallets);
+                } else if(urRegistryType.equals(RegistryType.CRYPTO_SEED)) {
+                    CryptoSeed cryptoSeed = (CryptoSeed)ur.decodeFromRegistry();
+                    DeterministicSeed seed = getSeed(cryptoSeed);
+                    return new Result(seed);
+                } else if(urRegistryType.equals(RegistryType.CRYPTO_BIP39)) {
+                    CryptoBip39 cryptoBip39 = (CryptoBip39)ur.decodeFromRegistry();
+                    DeterministicSeed seed = getSeed(cryptoBip39);
+                    return new Result(seed);
                 } else {
                     log.error("Unsupported UR type " + urRegistryType);
                     return new Result(new URException("UR type " + urRegistryType + " is not supported"));
@@ -406,25 +505,22 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
             List<Wallet> wallets = new ArrayList<>();
             String masterFingerprint = Utils.bytesToHex(cryptoAccount.getMasterFingerprint());
             for(CryptoOutput cryptoOutput : cryptoAccount.getOutputDescriptors()) {
-                Wallet wallet = new Wallet();
                 OutputDescriptor outputDescriptor = getOutputDescriptor(cryptoOutput);
-                if(outputDescriptor.isMultisig()) {
-                    throw new IllegalStateException("Multisig output descriptors are unsupported in CryptoAccount");
-                }
-
-                ExtendedKey extendedKey = outputDescriptor.getSingletonExtendedPublicKey();
-                wallet.setScriptType(outputDescriptor.getScriptType());
-                Keystore keystore = new Keystore();
-                keystore.setKeyDerivation(new KeyDerivation(masterFingerprint, outputDescriptor.getKeyDerivation(extendedKey).getDerivationPath()));
-                keystore.setExtendedPublicKey(extendedKey);
-                wallet.getKeystores().add(keystore);
+                Wallet wallet = outputDescriptor.toKeystoreWallet(masterFingerprint);
                 wallets.add(wallet);
             }
 
             return wallets;
         }
 
-        private ScriptType getScriptType(List<ScriptExpression> expressions) {
+        private ScriptType getScriptType(List<ScriptExpression> scriptExpressions) {
+            List<ScriptExpression> expressions = new ArrayList<>(scriptExpressions);
+            if(expressions.get(expressions.size() - 1) == ScriptExpression.MULTISIG
+                    || expressions.get(expressions.size() - 1) == ScriptExpression.SORTED_MULTISIG
+                    || expressions.get(expressions.size() - 1) == ScriptExpression.COSIGNER) {
+                expressions.remove(expressions.size() - 1);
+            }
+
             if(List.of(ScriptExpression.PUBLIC_KEY_HASH).equals(expressions)) {
                 return ScriptType.P2PKH;
             } else if(List.of(ScriptExpression.SCRIPT_HASH, ScriptExpression.WITNESS_PUBLIC_KEY_HASH).equals(expressions)) {
@@ -437,6 +533,8 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
                 return ScriptType.P2SH_P2WSH;
             } else if(List.of(ScriptExpression.WITNESS_SCRIPT_HASH).equals(expressions)) {
                 return ScriptType.P2WSH;
+            } else if(List.of(ScriptExpression.TAPROOT).equals(expressions)) {
+                return ScriptType.P2TR;
             }
 
             throw new IllegalArgumentException("Unknown script of " + expressions);
@@ -448,6 +546,14 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
             }
 
             return null;
+        }
+
+        private DeterministicSeed getSeed(CryptoSeed cryptoSeed) {
+            return new DeterministicSeed(cryptoSeed.getSeed(), null, cryptoSeed.getBirthdate() == null ? System.currentTimeMillis() : cryptoSeed.getBirthdate().getTime());
+        }
+
+        private DeterministicSeed getSeed(CryptoBip39 cryptoBip39) {
+            return new DeterministicSeed(cryptoBip39.getWords(), null, System.currentTimeMillis(), DeterministicSeed.Type.BIP39);
         }
     }
 
@@ -461,6 +567,7 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
         public void webcamClosed(WebcamEvent webcamEvent) {
             if(webcamResolutionProperty.get() != null) {
                 webcamService.setResolution(webcamResolutionProperty.get());
+                webcamService.setDevice(webcamDeviceProperty.get());
                 Platform.runLater(() -> {
                     if(!webcamService.isRunning()) {
                         webcamService.reset();
@@ -484,6 +591,7 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
     private class QRScanDialogPane extends DialogPane {
         @Override
         protected Node createButton(ButtonType buttonType) {
+            Node button = null;
             if(buttonType.getButtonData() == ButtonBar.ButtonData.LEFT) {
                 ToggleButton hd = new ToggleButton(buttonType.getText());
                 hd.setSelected(webcamResolutionProperty.get() == WebcamResolution.HD);
@@ -497,17 +605,42 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
                     setHdGraphic(hd, newValue);
                 });
 
-                return hd;
+                button = hd;
+            } else if(buttonType.getButtonData() == ButtonBar.ButtonData.HELP_2) {
+                ComboBox<WebcamDevice> devicesCombo = new ComboBox<>(WebcamScanDriver.getFoundDevices());
+                devicesCombo.setConverter(new StringConverter<>() {
+                    @Override
+                    public String toString(WebcamDevice device) {
+                        return device instanceof WebcamScanDevice ? ((WebcamScanDevice)device).getDeviceName() : "Default Camera";
+                    }
+
+                    @Override
+                    public WebcamDevice fromString(String string) {
+                        throw new UnsupportedOperationException();
+                    }
+                });
+                devicesCombo.valueProperty().bindBidirectional(webcamDeviceProperty);
+                ButtonBar.setButtonData(devicesCombo, ButtonBar.ButtonData.LEFT);
+
+                button = devicesCombo;
+            } else {
+                button = super.createButton(buttonType);
             }
 
-            return super.createButton(buttonType);
+            if(button instanceof Region) {
+                ((Region)button).setPrefWidth(150);
+                ((Region)button).setMaxWidth(150);
+            }
+
+            button.disableProperty().bind(webcamService.openingProperty());
+            return button;
         }
 
         private void setHdGraphic(ToggleButton hd, boolean isHd) {
             if(isHd) {
                 hd.setGraphic(getGlyph(FontAwesome5.Glyph.CHECK_CIRCLE));
             } else {
-                hd.setGraphic(getGlyph(FontAwesome5.Glyph.QUESTION_CIRCLE));
+                hd.setGraphic(getGlyph(FontAwesome5.Glyph.BAN));
             }
         }
 
@@ -525,6 +658,7 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
         public final ExtendedKey extendedKey;
         public final OutputDescriptor outputDescriptor;
         public final List<Wallet> wallets;
+        public final DeterministicSeed seed;
         public final String payload;
         public final Throwable exception;
 
@@ -535,6 +669,7 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
             this.extendedKey = null;
             this.outputDescriptor = null;
             this.wallets = null;
+            this.seed = null;
             this.payload = null;
             this.exception = null;
         }
@@ -546,6 +681,7 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
             this.extendedKey = null;
             this.outputDescriptor = null;
             this.wallets = null;
+            this.seed = null;
             this.payload = null;
             this.exception = null;
         }
@@ -557,6 +693,7 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
             this.extendedKey = null;
             this.outputDescriptor = null;
             this.wallets = null;
+            this.seed = null;
             this.payload = null;
             this.exception = null;
         }
@@ -568,6 +705,7 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
             this.extendedKey = null;
             this.outputDescriptor = null;
             this.wallets = null;
+            this.seed = null;
             this.payload = null;
             this.exception = null;
         }
@@ -579,6 +717,7 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
             this.extendedKey = extendedKey;
             this.outputDescriptor = null;
             this.wallets = null;
+            this.seed = null;
             this.payload = null;
             this.exception = null;
         }
@@ -590,6 +729,7 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
             this.extendedKey = null;
             this.outputDescriptor = outputDescriptor;
             this.wallets = null;
+            this.seed = null;
             this.payload = null;
             this.exception = null;
         }
@@ -601,6 +741,19 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
             this.extendedKey = null;
             this.outputDescriptor = null;
             this.wallets = wallets;
+            this.seed = null;
+            this.payload = null;
+            this.exception = null;
+        }
+
+        public Result(DeterministicSeed seed) {
+            this.transaction = null;
+            this.psbt = null;
+            this.uri = null;
+            this.extendedKey = null;
+            this.outputDescriptor = null;
+            this.wallets = null;
+            this.seed = seed;
             this.payload = null;
             this.exception = null;
         }
@@ -612,6 +765,7 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
             this.extendedKey = null;
             this.outputDescriptor = null;
             this.wallets = null;
+            this.seed = null;
             this.payload = payload;
             this.exception = null;
         }
@@ -623,6 +777,7 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
             this.extendedKey = null;
             this.outputDescriptor = null;
             this.wallets = null;
+            this.seed = null;
             this.payload = null;
             this.exception = exception;
         }
@@ -661,6 +816,48 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
 
         public URException(String message, Throwable cause) {
             super(message, cause);
+        }
+    }
+
+    public static class WebcamDependencyException extends ScanException {
+        public WebcamDependencyException() {
+            super();
+        }
+
+        public WebcamDependencyException(String message) {
+            super(message);
+        }
+
+        public WebcamDependencyException(Throwable cause) {
+            super(cause);
+        }
+
+        public WebcamDependencyException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
+    public static class WebcamOpenException extends ScanException {
+        public WebcamOpenException() {
+            super();
+        }
+
+        public WebcamOpenException(String message) {
+            super(message);
+        }
+
+        public WebcamOpenException(Throwable cause) {
+            super(cause);
+        }
+
+        public WebcamOpenException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
+    public static class ScanDelayCalculator implements WebcamUpdater.DelayCalculator {
+        public long calculateDelay(long snapshotDuration, double deviceFps) {
+            return Math.max(SCAN_PERIOD_MILLIS - snapshotDuration, 0L);
         }
     }
 }

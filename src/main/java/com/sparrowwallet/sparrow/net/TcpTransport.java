@@ -2,6 +2,7 @@ package com.sparrowwallet.sparrow.net;
 
 import com.github.arteam.simplejsonrpc.client.Transport;
 import com.github.arteam.simplejsonrpc.server.JsonRpcServer;
+import com.google.common.base.Splitter;
 import com.google.common.net.HostAndPort;
 import com.google.gson.Gson;
 import com.sparrowwallet.sparrow.io.Config;
@@ -10,24 +11,32 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.net.SocketFactory;
+import javax.net.ssl.SSLHandshakeException;
 import java.io.*;
+import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 
-public class TcpTransport implements Transport, Closeable {
+public class TcpTransport implements CloseableTransport, TimeoutCounter {
     private static final Logger log = LoggerFactory.getLogger(TcpTransport.class);
 
-    public static final int DEFAULT_PORT = 50001;
-    private static final int[] READ_TIMEOUT_SECS = {3, 8, 16, 34};
+    public static final int DEFAULT_MAX_TIMEOUT = 34;
+    private static final int[] BASE_READ_TIMEOUT_SECS = {3, 8, 16, DEFAULT_MAX_TIMEOUT};
+    private static final int[] SLOW_READ_TIMEOUT_SECS = {34, 68, 124, 208};
+    public static final long PER_REQUEST_READ_TIMEOUT_MILLIS = 50;
+    public static final int SOCKET_READ_TIMEOUT_MILLIS = 5000;
 
     protected final HostAndPort server;
     protected final SocketFactory socketFactory;
+    protected final int[] readTimeouts;
 
-    private Socket socket;
+    protected Socket socket;
 
     private String response;
 
@@ -37,8 +46,10 @@ public class TcpTransport implements Transport, Closeable {
     private final ReentrantLock clientRequestLock = new ReentrantLock();
     private boolean running = false;
     private volatile boolean reading = true;
+    private boolean closed = false;
     private boolean firstRead = true;
     private int readTimeoutIndex;
+    private int requestIdCount = 1;
 
     private final JsonRpcServer jsonRpcServer = new JsonRpcServer();
     private final SubscriptionService subscriptionService = new SubscriptionService();
@@ -47,8 +58,19 @@ public class TcpTransport implements Transport, Closeable {
     private final Gson gson = new Gson();
 
     public TcpTransport(HostAndPort server) {
+        this(server, null);
+    }
+
+    public TcpTransport(HostAndPort server, HostAndPort proxy) {
         this.server = server;
-        this.socketFactory = SocketFactory.getDefault();
+        this.socketFactory = (proxy == null ? SocketFactory.getDefault() : new ProxySocketFactory(proxy));
+
+        int[] timeouts = (Config.get().getServerType() == ServerType.BITCOIN_CORE && Protocol.isOnionAddress(Config.get().getCoreServer()) ?
+                Arrays.copyOf(SLOW_READ_TIMEOUT_SECS, SLOW_READ_TIMEOUT_SECS.length) : Arrays.copyOf(BASE_READ_TIMEOUT_SECS, BASE_READ_TIMEOUT_SECS.length));
+        if(Config.get().getMaxServerTimeout() > timeouts[timeouts.length - 1]) {
+            timeouts[timeouts.length - 1] = Config.get().getMaxServerTimeout();
+        }
+        this.readTimeouts = timeouts;
     }
 
     @Override
@@ -59,6 +81,8 @@ public class TcpTransport implements Transport, Closeable {
             Rpc recvRpc;
             String recv;
 
+            //Count number of requests in batched query to increase read timeout appropriately
+            requestIdCount = Splitter.on("\"id\"").splitToList(request).size() - 1;
             writeRequest(request);
             do {
                 recv = readResponse();
@@ -72,6 +96,14 @@ public class TcpTransport implements Transport, Closeable {
     }
 
     private void writeRequest(String request) throws IOException {
+        if(log.isTraceEnabled()) {
+            log.trace("Sending to electrum server at " + server + ": " + request);
+        }
+
+        if(socket == null) {
+            throw new IllegalStateException("Socket connection has not been established.");
+        }
+
         PrintWriter out = new PrintWriter(new BufferedWriter(new OutputStreamWriter(socket.getOutputStream())));
         out.println(request);
         out.flush();
@@ -79,16 +111,16 @@ public class TcpTransport implements Transport, Closeable {
 
     private String readResponse() throws IOException {
         try {
-            if(!readLock.tryLock(READ_TIMEOUT_SECS[readTimeoutIndex], TimeUnit.SECONDS)) {
-                readTimeoutIndex = Math.min(readTimeoutIndex + 1, READ_TIMEOUT_SECS.length - 1);
-                log.debug("No response from server, setting read timeout to " + READ_TIMEOUT_SECS[readTimeoutIndex] + " secs");
+            if(!readLock.tryLock((readTimeouts[readTimeoutIndex] * 1000L) + (requestIdCount * PER_REQUEST_READ_TIMEOUT_MILLIS), TimeUnit.MILLISECONDS)) {
+                readTimeoutIndex = Math.min(readTimeoutIndex + 1, readTimeouts.length - 1);
+                log.warn("No response from server, setting read timeout to " + readTimeouts[readTimeoutIndex] + " secs");
                 throw new IOException("No response from server");
             }
         } catch(InterruptedException e) {
             throw new IOException("Read thread interrupted");
         }
 
-        if(readTimeoutIndex == READ_TIMEOUT_SECS.length - 1) {
+        if(readTimeoutIndex == readTimeouts.length - 1) {
             readTimeoutIndex--;
         }
 
@@ -102,8 +134,9 @@ public class TcpTransport implements Transport, Closeable {
                 try {
                     readingCondition.await();
                 } catch(InterruptedException e) {
-                    //Restore interrupt status and continue
+                    //Restore interrupt status and break
                     Thread.currentThread().interrupt();
+                    break;
                 }
             }
 
@@ -161,7 +194,9 @@ public class TcpTransport implements Transport, Closeable {
                 }
             }
         } catch(IOException e) {
-            log.error("Error opening socket inputstream", e);
+            if(!closed) {
+                log.error("Error opening socket inputstream", e);
+            }
             if(running) {
                 lastException = e;
                 reading = false;
@@ -175,38 +210,68 @@ public class TcpTransport implements Transport, Closeable {
     }
 
     protected String readInputStream(BufferedReader in) throws IOException {
-        String response = in.readLine();
+        String response = readLine(in);
 
         if(response == null) {
-            throw new IOException("Could not connect to server at " + Config.get().getServerAddress());
+            throw new IOException("Could not connect to server" + (Config.get().hasServer() ? " at " + Config.get().getServer().getUrl() : ""));
         }
 
         return response;
     }
 
+    private String readLine(BufferedReader in) throws IOException {
+        while(!socket.isClosed()) {
+            try {
+                return in.readLine();
+            } catch(SocketTimeoutException e) {
+                //ignore and continue
+            }
+        }
+
+        return null;
+    }
+
     public void connect() throws ServerException {
         try {
-            socket = createSocket();
+            createSocket();
+            log.debug("Created " + socket);
+            socket.setSoTimeout(SOCKET_READ_TIMEOUT_MILLIS);
             running = true;
+        } catch(SSLHandshakeException e) {
+            throw new TlsServerException(server, e);
         } catch(IOException e) {
+            if(e.getStackTrace().length > 0 && e.getStackTrace()[0].getClassName().contains("SocksSocketImpl")) {
+                throw new ProxyServerException(e);
+            }
+
             throw new ServerException(e);
         }
     }
 
     public boolean isConnected() {
-        return socket != null && running;
+        return socket != null && running && !closed;
     }
 
-    protected Socket createSocket() throws IOException {
-        return socketFactory.createSocket(server.getHost(), server.getPortOrDefault(DEFAULT_PORT));
+    protected void createSocket() throws IOException {
+        socket = socketFactory.createSocket();
+        socket.connect(new InetSocketAddress(server.getHost(), server.getPortOrDefault(Protocol.TCP.getDefaultPort())));
+    }
+
+    public boolean isClosed() {
+        return closed;
     }
 
     @Override
     public void close() throws IOException {
         if(socket != null) {
-            running = false;
             socket.close();
         }
+        closed = true;
+    }
+
+    @Override
+    public int getTimeoutCount() {
+        return readTimeoutIndex;
     }
 
     private static class Rpc {

@@ -44,7 +44,7 @@ public class InputController extends TransactionFormController implements Initia
     private Hyperlink linkedOutpoint;
 
     @FXML
-    private CoinLabel spends;
+    private CopyableCoinLabel spends;
 
     @FXML
     private CopyableLabel from;
@@ -104,7 +104,7 @@ public class InputController extends TransactionFormController implements Initia
     private CopyableLabel locktimeAbsolute;
 
     @FXML
-    private Spinner<Integer> locktimeRelativeBlocks;
+    private IntegerSpinner locktimeRelativeBlocks;
 
     @FXML
     private RelativeTimelockSpinner locktimeRelativeSeconds;
@@ -146,11 +146,11 @@ public class InputController extends TransactionFormController implements Initia
         String baseText = getLegendText(txInput);
         if(signingWallet != null) {
             if(inputForm.isWalletTxo()) {
-                inputFieldset.setText(baseText + " - " + signingWallet.getName());
+                inputFieldset.setText(baseText + " from " + signingWallet.getFullDisplayName());
                 inputFieldset.setIcon(TransactionDiagram.getTxoGlyph());
             } else {
-                inputFieldset.setText(baseText + " - Payjoin");
-                inputFieldset.setIcon(TransactionDiagram.getPayjoinGlyph());
+                inputFieldset.setText(baseText + " - External");
+                inputFieldset.setIcon(TransactionDiagram.getMixGlyph());
             }
         } else {
             inputFieldset.setText(baseText);
@@ -406,7 +406,7 @@ public class InputController extends TransactionFormController implements Initia
             }
         });
 
-        locktimeRelativeBlocks.setValueFactory(new SpinnerValueFactory.IntegerSpinnerValueFactory(0, (int)TransactionInput.RELATIVE_TIMELOCK_VALUE_MASK, 0));
+        locktimeRelativeBlocks.setValueFactory(new IntegerSpinner.ValueFactory(0, (int)TransactionInput.RELATIVE_TIMELOCK_VALUE_MASK, 0));
         locktimeRelativeBlocks.managedProperty().bind(locktimeRelativeBlocks.visibleProperty());
         locktimeRelativeSeconds.managedProperty().bind(locktimeRelativeSeconds.visibleProperty());
         locktimeRelativeCombo.getSelectionModel().selectedItemProperty().addListener((ov, old_toggle, new_toggle) -> {
@@ -433,6 +433,10 @@ public class InputController extends TransactionFormController implements Initia
         }
 
         locktimeRelativeBlocks.valueProperty().addListener((obs, oldValue, newValue) -> {
+            if(newValue == null || newValue < 0 || newValue > TransactionInput.RELATIVE_TIMELOCK_VALUE_MASK) {
+                return;
+            }
+
             setRelativeLocktime(txInput, transaction, oldValue != null);
         });
         locktimeRelativeSeconds.valueProperty().addListener((obs, oldValue, newValue) -> {
@@ -509,7 +513,7 @@ public class InputController extends TransactionFormController implements Initia
 
     @Subscribe
     public void blockTransactionFetched(BlockTransactionFetchedEvent event) {
-        if(event.getTxId().equals(inputForm.getTransaction().getTxId()) && inputForm.getIndex() >= event.getPageStart() && inputForm.getIndex() < event.getPageEnd()) {
+        if(event.getTxId().equals(inputForm.getTransaction().getTxId()) && !event.getInputTransactions().isEmpty() && inputForm.getIndex() >= event.getPageStart() && inputForm.getIndex() < event.getPageEnd()) {
             updateOutpoint(event.getInputTransactions());
             if(inputForm.getPsbt() == null) {
                 updateSpends(event.getInputTransactions());
@@ -525,8 +529,8 @@ public class InputController extends TransactionFormController implements Initia
     }
 
     @Subscribe
-    public void bitcoinUnitChanged(BitcoinUnitChangedEvent event) {
-        spends.refresh(event.getBitcoinUnit());
+    public void unitFormatChanged(UnitFormatChangedEvent event) {
+        spends.refresh(event.getUnitFormat(), event.getBitcoinUnit());
     }
 
     @Subscribe

@@ -7,12 +7,9 @@ import com.sparrowwallet.drongo.psbt.PSBTInput;
 import com.sparrowwallet.drongo.wallet.BlockTransaction;
 import com.sparrowwallet.drongo.wallet.Keystore;
 import com.sparrowwallet.sparrow.EventManager;
-import com.sparrowwallet.sparrow.control.CoinLabel;
+import com.sparrowwallet.sparrow.control.CopyableCoinLabel;
 import com.sparrowwallet.sparrow.control.CopyableLabel;
-import com.sparrowwallet.sparrow.event.BitcoinUnitChangedEvent;
-import com.sparrowwallet.sparrow.event.BlockTransactionFetchedEvent;
-import com.sparrowwallet.sparrow.event.PSBTCombinedEvent;
-import com.sparrowwallet.sparrow.event.PSBTFinalizedEvent;
+import com.sparrowwallet.sparrow.event.*;
 import javafx.collections.MapChangeListener;
 import javafx.fxml.FXML;
 import javafx.fxml.Initializable;
@@ -31,7 +28,7 @@ public class InputsController extends TransactionFormController implements Initi
     private CopyableLabel count;
 
     @FXML
-    private CoinLabel total;
+    private CopyableCoinLabel total;
 
     @FXML
     private CopyableLabel signatures;
@@ -164,14 +161,14 @@ public class InputsController extends TransactionFormController implements Initi
 
     @Subscribe
     public void blockTransactionFetched(BlockTransactionFetchedEvent event) {
-        if(event.getTxId().equals(inputsForm.getTransaction().getTxId()) && inputsForm.getPsbt() == null) {
+        if(event.getTxId().equals(inputsForm.getTransaction().getTxId()) && !event.getInputTransactions().isEmpty() && inputsForm.getPsbt() == null) {
             updateBlockTransactionInputs(event.getInputTransactions());
         }
     }
 
     @Subscribe
-    public void bitcoinUnitChanged(BitcoinUnitChangedEvent event) {
-        total.refresh(event.getBitcoinUnit());
+    public void unitFormatChanged(UnitFormatChangedEvent event) {
+        total.refresh(event.getUnitFormat(), event.getBitcoinUnit());
     }
 
     @Subscribe

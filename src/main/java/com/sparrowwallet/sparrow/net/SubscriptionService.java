@@ -12,7 +12,7 @@ import javafx.application.Platform;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Set;
+import java.util.List;
 
 @JsonRpcService
 public class SubscriptionService {
@@ -25,17 +25,12 @@ public class SubscriptionService {
 
     @JsonRpcMethod("blockchain.scripthash.subscribe")
     public void scriptHashStatusUpdated(@JsonRpcParam("scripthash") final String scriptHash, @JsonRpcOptional @JsonRpcParam("status") final String status) {
-        if(status == null) {
-            //Mempool transaction was replaced returning change/consolidation script hash status to null, ignore this update
-            return;
-        }
-
-        Set<String> existingStatuses = ElectrumServer.getSubscribedScriptHashes().get(scriptHash);
+        List<String> existingStatuses = ElectrumServer.getSubscribedScriptHashes().get(scriptHash);
         if(existingStatuses == null) {
-            log.warn("Received script hash status update for unsubscribed script hash: " + scriptHash);
+            log.debug("Received script hash status update for unsubscribed script hash: " + scriptHash);
             ElectrumServer.updateSubscribedScriptHashStatus(scriptHash, status);
-        } else if(existingStatuses.contains(status)) {
-            log.warn("Received script hash status update, but status has not changed");
+        } else if(status != null && existingStatuses.contains(status)) {
+            log.debug("Received script hash status update, but status has not changed");
             return;
         } else {
             String oldStatus = Iterables.getLast(existingStatuses);

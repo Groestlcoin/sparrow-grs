@@ -48,7 +48,7 @@
                         <FXCollections fx:factory="observableArrayList">
                             <FeeRatesSource fx:constant="ELECTRUM_SERVER" />
                             <!--FeeRatesSource fx:constant="MEMPOOL_SPACE" /-->
-                            <!--FeeRatesSource fx:constant="BITCOINFEES_EARN_COM" /-->
+                            <!--FeeRatesSource fx:constant="MINIMUM" /-->
                         </FXCollections>
                     </items>
                 </ComboBox>
@@ -71,14 +71,24 @@
                 </ComboBox>
             </Field>
         </Fieldset>
+        <Fieldset inputGrow="SOMETIMES" text="Wallet" styleClass="wideLabelFieldSet">
+            <Field text="Load recent wallets:">
+                <UnlabeledToggleSwitch fx:id="loadRecentWallets" />
+                <HelpLabel helpText="Keep a record of open wallets, and reopen them on startup."/>
+            </Field>
+            <Field text="Validate derivations:">
+                <UnlabeledToggleSwitch fx:id="validateDerivationPaths" />
+                <HelpLabel helpText="Disallow keystores to have derivation paths that match the defaults for other script types."/>
+            </Field>
+        </Fieldset>
         <Fieldset inputGrow="SOMETIMES" text="Coin Selection" styleClass="wideLabelFieldSet">
             <Field text="Group by address:">
                 <UnlabeledToggleSwitch fx:id="groupByAddress" />
                 <HelpLabel helpText="Group UTXOs by address when sending to improve privacy by only sending from an address once."/>
             </Field>
-            <Field text="Use mempool change:">
-                <UnlabeledToggleSwitch fx:id="includeMempoolChange" />
-                <HelpLabel helpText="Allow a wallet to spend UTXOs that are still in the mempool where all their inputs are from that wallet."/>
+            <Field text="Allow unconfirmed:">
+                <UnlabeledToggleSwitch fx:id="includeMempoolOutputs" />
+                <HelpLabel helpText="Allow a wallet to spend UTXOs that are still in the mempool."/>
             </Field>
         </Fieldset>
         <Fieldset inputGrow="SOMETIMES" text="Notifications" styleClass="wideLabelFieldSet">

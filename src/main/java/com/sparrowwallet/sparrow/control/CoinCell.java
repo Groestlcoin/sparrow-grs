@@ -2,24 +2,36 @@ package com.sparrowwallet.sparrow.control;
 
 import com.sparrowwallet.drongo.BitcoinUnit;
 import com.sparrowwallet.drongo.protocol.Transaction;
+import com.sparrowwallet.drongo.wallet.BlockTransactionHash;
+import com.sparrowwallet.sparrow.UnitFormat;
 import com.sparrowwallet.sparrow.wallet.Entry;
 import com.sparrowwallet.sparrow.wallet.HashIndexEntry;
 import com.sparrowwallet.sparrow.wallet.TransactionEntry;
 import com.sparrowwallet.sparrow.wallet.UtxoEntry;
+import javafx.beans.property.IntegerProperty;
+import javafx.beans.property.SimpleIntegerProperty;
 import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.Tooltip;
 import javafx.scene.control.TreeTableCell;
 import javafx.scene.layout.Region;
+import javafx.util.Duration;
+import org.controlsfx.tools.Platform;
 
-import java.util.Locale;
+import java.text.DecimalFormat;
 
-class CoinCell extends TreeTableCell<Entry, Number> {
-    private final Tooltip tooltip;
+class CoinCell extends TreeTableCell<Entry, Number> implements ConfirmationsListener {
+    private final CoinTooltip tooltip;
+
+    private IntegerProperty confirmationsProperty;
 
     public CoinCell() {
         super();
-        tooltip = new Tooltip();
+        tooltip = new CoinTooltip();
+        tooltip.setShowDelay(Duration.millis(500));
         getStyleClass().add("coin-cell");
+        if(Platform.getCurrent() == Platform.OSX) {
+            getStyleClass().add("number-field");
+        }
     }
 
     @Override
@@ -35,28 +47,24 @@ class CoinCell extends TreeTableCell<Entry, Number> {
             EntryCell.applyRowStyles(this, entry);
 
             CoinTreeTable coinTreeTable = (CoinTreeTable)getTreeTableView();
+            UnitFormat format = coinTreeTable.getUnitFormat();
             BitcoinUnit unit = coinTreeTable.getBitcoinUnit();
 
-            String satsValue = String.format(Locale.ENGLISH, "%,d", amount.longValue());
-            final String btcValue = CoinLabel.getBTCFormat().format(amount.doubleValue() / Transaction.SATOSHIS_PER_BITCOIN);
+            String satsValue = format.formatSatsValue(amount.longValue());
+            DecimalFormat decimalFormat = (amount.longValue() == 0L ? format.getBtcFormat() : format.getTableBtcFormat());
+            final String btcValue = decimalFormat.format(amount.doubleValue() / Transaction.SATOSHIS_PER_BITCOIN);
 
             if(unit.equals(BitcoinUnit.BTC)) {
-                tooltip.setText(satsValue + " " + BitcoinUnit.SATOSHIS.getLabel());
+                tooltip.setValue(satsValue + " " + BitcoinUnit.SATOSHIS.getLabel());
                 setText(btcValue);
             } else {
-                tooltip.setText(btcValue + " " + BitcoinUnit.BTC.getLabel());
+                tooltip.setValue(btcValue + " " + BitcoinUnit.BTC.getLabel());
                 setText(satsValue);
             }
             setTooltip(tooltip);
-            String tooltipValue = tooltip.getText();
 
-            if(entry instanceof TransactionEntry) {
-                TransactionEntry transactionEntry = (TransactionEntry)entry;
-                tooltip.setText(tooltipValue + " (" + transactionEntry.getConfirmationsDescription() + ")");
-
-                transactionEntry.confirmationsProperty().addListener((observable, oldValue, newValue) -> {
-                    tooltip.setText(tooltipValue + " (" + transactionEntry.getConfirmationsDescription() + ")");
-                });
+            if(entry instanceof TransactionEntry transactionEntry) {
+                tooltip.showConfirmations(transactionEntry.confirmationsProperty());
 
                 if(transactionEntry.isConfirming()) {
                     ConfirmationProgressIndicator arc = new ConfirmationProgressIndicator(transactionEntry.getConfirmations());
@@ -65,6 +73,10 @@ class CoinCell extends TreeTableCell<Entry, Number> {
                     setContentDisplay(ContentDisplay.LEFT);
                 } else {
                     setGraphic(null);
+                }
+
+                if(amount.longValue() < 0) {
+                    getStyleClass().add("negative-amount");
                 }
             } else if(entry instanceof UtxoEntry) {
                 setGraphic(null);
@@ -79,6 +91,67 @@ class CoinCell extends TreeTableCell<Entry, Number> {
                 }
             } else {
                 setGraphic(null);
+            }
+        }
+    }
+
+    @Override
+    public IntegerProperty getConfirmationsProperty() {
+        if(confirmationsProperty == null) {
+            confirmationsProperty = new SimpleIntegerProperty();
+            confirmationsProperty.addListener((observable, oldValue, newValue) -> {
+                if(newValue.intValue() >= BlockTransactionHash.BLOCKS_TO_CONFIRM) {
+                    getStyleClass().remove("confirming");
+                    confirmationsProperty.unbind();
+                }
+            });
+        }
+
+        return confirmationsProperty;
+    }
+
+    private static final class CoinTooltip extends Tooltip {
+        private final IntegerProperty confirmationsProperty = new SimpleIntegerProperty();
+        private boolean showConfirmations;
+        private String value;
+
+        public void setValue(String value) {
+            this.value = value;
+            setTooltipText();
+        }
+
+        public void showConfirmations(IntegerProperty txEntryConfirmationsProperty) {
+            showConfirmations = true;
+
+            int confirmations = txEntryConfirmationsProperty.get();
+            if(confirmations < BlockTransactionHash.BLOCKS_TO_FULLY_CONFIRM) {
+                confirmationsProperty.bind(txEntryConfirmationsProperty);
+                confirmationsProperty.addListener((observable, oldValue, newValue) -> {
+                    setTooltipText();
+                    if(newValue.intValue() >= BlockTransactionHash.BLOCKS_TO_FULLY_CONFIRM) {
+                        confirmationsProperty.unbind();
+                    }
+                });
+            } else {
+                confirmationsProperty.unbind();
+                confirmationsProperty.set(confirmations);
+            }
+
+            setTooltipText();
+        }
+
+        private void setTooltipText() {
+            setText(value + (showConfirmations ? " (" + getConfirmationsDescription() + ")" : ""));
+        }
+
+        public String getConfirmationsDescription() {
+            int confirmations = confirmationsProperty.get();
+            if(confirmations == 0) {
+                return "Unconfirmed in mempool";
+            } else if(confirmations < BlockTransactionHash.BLOCKS_TO_FULLY_CONFIRM) {
+                return confirmations + " confirmation" + (confirmations == 1 ? "" : "s");
+            } else {
+                return BlockTransactionHash.BLOCKS_TO_FULLY_CONFIRM + "+ confirmations";
             }
         }
     }

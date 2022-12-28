@@ -2,11 +2,12 @@ package com.sparrowwallet.sparrow.control;
 
 import com.sparrowwallet.drongo.BitcoinUnit;
 import com.sparrowwallet.drongo.wallet.Wallet;
+import com.sparrowwallet.sparrow.UnitFormat;
 import com.sparrowwallet.sparrow.AppServices;
 import com.sparrowwallet.sparrow.EventManager;
+import com.sparrowwallet.sparrow.event.WalletAddressesChangedEvent;
 import com.sparrowwallet.sparrow.event.WalletDataChangedEvent;
 import com.sparrowwallet.sparrow.event.WalletHistoryStatusEvent;
-import com.sparrowwallet.sparrow.event.WalletSettingsChangedEvent;
 import com.sparrowwallet.sparrow.io.Config;
 import com.sparrowwallet.sparrow.io.Storage;
 import com.sparrowwallet.sparrow.net.ServerType;
@@ -26,25 +27,36 @@ import java.util.Optional;
 
 public class CoinTreeTable extends TreeTableView<Entry> {
     private BitcoinUnit bitcoinUnit;
+    private UnitFormat unitFormat;
 
     public BitcoinUnit getBitcoinUnit() {
         return bitcoinUnit;
     }
 
-    public void setBitcoinUnit(BitcoinUnit bitcoinUnit) {
-        this.bitcoinUnit = bitcoinUnit;
+    public UnitFormat getUnitFormat() {
+        return unitFormat;
     }
 
-    public void setBitcoinUnit(Wallet wallet) {
-        setBitcoinUnit(wallet, Config.get().getBitcoinUnit());
+    public void setUnitFormat(Wallet wallet) {
+        setUnitFormat(wallet, Config.get().getUnitFormat(), Config.get().getBitcoinUnit());
     }
 
-    public void setBitcoinUnit(Wallet wallet, BitcoinUnit unit) {
+    public void setUnitFormat(Wallet wallet, UnitFormat format) {
+        setUnitFormat(wallet, format, Config.get().getBitcoinUnit());
+    }
+
+    public void setUnitFormat(Wallet wallet, UnitFormat format, BitcoinUnit unit) {
+        if(format == null) {
+            format = UnitFormat.DOT;
+        }
+
         if(unit == null || unit.equals(BitcoinUnit.AUTO)) {
             unit = wallet.getAutoUnit();
         }
 
-        boolean changed = (bitcoinUnit != unit);
+        boolean changed = (unitFormat != format);
+        changed |= (bitcoinUnit != unit);
+        this.unitFormat = format;
         this.bitcoinUnit = unit;
 
         if(changed && !getChildren().isEmpty()) {
@@ -84,15 +96,14 @@ public class CoinTreeTable extends TreeTableView<Entry> {
                 WalletBirthDateDialog dlg = new WalletBirthDateDialog(wallet.getBirthDate());
                 Optional<Date> optDate = dlg.showAndWait();
                 if(optDate.isPresent()) {
-                    wallet.setBirthDate(optDate.get());
                     Storage storage = AppServices.get().getOpenWallets().get(wallet);
-                    if(storage != null) {
-                        //Trigger background save of birthdate
-                        EventManager.get().post(new WalletDataChangedEvent(wallet));
-                        //Trigger full wallet rescan
-                        wallet.clearHistory();
-                        EventManager.get().post(new WalletSettingsChangedEvent(wallet, storage.getWalletFile()));
-                    }
+                    Wallet pastWallet = wallet.copy();
+                    wallet.setBirthDate(optDate.get());
+                    //Trigger background save of birthdate
+                    EventManager.get().post(new WalletDataChangedEvent(wallet));
+                    //Trigger full wallet rescan
+                    wallet.clearHistory();
+                    EventManager.get().post(new WalletAddressesChangedEvent(wallet, pastWallet, storage.getWalletId(wallet)));
                 }
             });
             if(wallet.getBirthDate() == null) {

@@ -1,31 +1,54 @@
 package com.sparrowwallet.sparrow.control;
 
-import com.github.sarxos.webcam.Webcam;
-import com.github.sarxos.webcam.WebcamListener;
-import com.github.sarxos.webcam.WebcamResolution;
+import com.github.sarxos.webcam.*;
 import com.google.zxing.*;
 import com.google.zxing.client.j2se.BufferedImageLuminanceSource;
 import com.google.zxing.common.HybridBinarizer;
+import com.google.zxing.qrcode.QRCodeReader;
+import com.sparrowwallet.sparrow.io.Config;
+import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.ObjectProperty;
+import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleObjectProperty;
-import javafx.concurrent.Service;
+import javafx.concurrent.ScheduledService;
 import javafx.concurrent.Task;
 import javafx.embed.swing.SwingFXUtils;
 import javafx.scene.image.Image;
 
+import java.awt.*;
+import java.awt.geom.RoundRectangle2D;
 import java.awt.image.BufferedImage;
 import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
-public class WebcamService extends Service<Image> {
+public class WebcamService extends ScheduledService<Image> {
     private WebcamResolution resolution;
+    private WebcamDevice device;
     private final WebcamListener listener;
+    private final WebcamUpdater.DelayCalculator delayCalculator;
+    private final BooleanProperty opening = new SimpleBooleanProperty(false);
 
     private final ObjectProperty<Result> resultProperty = new SimpleObjectProperty<>(null);
 
-    public WebcamService(WebcamResolution resolution, WebcamListener listener) {
+    private static final int QR_SAMPLE_PERIOD_MILLIS = 200;
+
+    private Webcam cam;
+    private long lastQrSampleTime;
+    private final Reader qrReader;
+
+    static {
+        Webcam.setDriver(new WebcamScanDriver());
+    }
+
+    public WebcamService(WebcamResolution resolution, WebcamDevice device, WebcamListener listener, WebcamUpdater.DelayCalculator delayCalculator) {
         this.resolution = resolution;
+        this.device = device;
         this.listener = listener;
+        this.delayCalculator = delayCalculator;
+        this.lastQrSampleTime = System.currentTimeMillis();
+        this.qrReader = new QRCodeReader();
     }
 
     @Override
@@ -33,41 +56,123 @@ public class WebcamService extends Service<Image> {
         return new Task<Image>() {
             @Override
             protected Image call() throws Exception {
-                Webcam cam = Webcam.getWebcams(1, TimeUnit.MINUTES).get(0);
                 try {
-                    cam.setCustomViewSizes(resolution.getSize());
-                    cam.setViewSize(resolution.getSize());
-                    if(!Arrays.asList(cam.getWebcamListeners()).contains(listener)) {
-                        cam.addWebcamListener(listener);
+                    if(cam == null) {
+                        List<Webcam> webcams = Webcam.getWebcams(1, TimeUnit.MINUTES);
+                        if(webcams.isEmpty()) {
+                            throw new UnsupportedOperationException("No camera available.");
+                        }
+
+                        cam = webcams.get(0);
+
+                        if(device != null) {
+                            for(Webcam webcam : webcams) {
+                                if(webcam.getDevice().getName().equals(device.getName())) {
+                                    cam = webcam;
+                                }
+                            }
+                        } else if(Config.get().getWebcamDevice() != null) {
+                            for(Webcam webcam : webcams) {
+                                if(webcam.getDevice().getName().equals(Config.get().getWebcamDevice())) {
+                                    cam = webcam;
+                                }
+                            }
+                        }
+
+                        device = cam.getDevice();
+
+                        cam.setCustomViewSizes(resolution.getSize());
+                        cam.setViewSize(resolution.getSize());
+                        if(!Arrays.asList(cam.getWebcamListeners()).contains(listener)) {
+                            cam.addWebcamListener(listener);
+                        }
+
+                        opening.set(true);
+                        cam.open(true, delayCalculator);
+                        opening.set(false);
                     }
 
-                    cam.open();
-                    while(!isCancelled()) {
-                        if(cam.isImageNew()) {
-                            BufferedImage bimg = cam.getImage();
-                            updateValue(SwingFXUtils.toFXImage(bimg, null));
-                            readQR(bimg);
-                        }
+                    BufferedImage originalImage = cam.getImage();
+                    if(originalImage == null) {
+                        return null;
                     }
-                    cam.close();
-                    return getValue();
+
+                    CroppedDimension cropped = getCroppedDimension(originalImage);
+                    BufferedImage croppedImage = originalImage.getSubimage(cropped.x, cropped.y, cropped.length, cropped.length);
+                    BufferedImage framedImage = getFramedImage(originalImage, cropped);
+
+                    Image image = SwingFXUtils.toFXImage(framedImage, null);
+                    updateValue(image);
+
+                    if(System.currentTimeMillis() > (lastQrSampleTime + QR_SAMPLE_PERIOD_MILLIS)) {
+                        readQR(originalImage, croppedImage);
+                        lastQrSampleTime = System.currentTimeMillis();
+                    }
+
+                    return image;
                 } finally {
-                    cam.close();
+                    opening.set(false);
                 }
             }
         };
     }
 
-    private void readQR(BufferedImage bufferedImage) {
+    @Override
+    public void reset() {
+        cam = null;
+        super.reset();
+    }
+
+    @Override
+    public boolean cancel() {
+        if(cam != null && !cam.close()) {
+            cam.close();
+        }
+
+        return super.cancel();
+    }
+
+    private void readQR(BufferedImage wideImage, BufferedImage croppedImage) {
+        Result result = readQR(wideImage);
+        if(result == null) {
+            result = readQR(croppedImage);
+        }
+
+        if(result != null) {
+            resultProperty.set(result);
+        }
+    }
+
+    private Result readQR(BufferedImage bufferedImage) {
         LuminanceSource source = new BufferedImageLuminanceSource(bufferedImage);
         BinaryBitmap bitmap = new BinaryBitmap(new HybridBinarizer(source));
 
         try {
-            Result result = new MultiFormatReader().decode(bitmap);
-            resultProperty.set(result);
-        } catch(NotFoundException e) {
+            return qrReader.decode(bitmap, Map.of(DecodeHintType.TRY_HARDER, Boolean.TRUE));
+        } catch(ReaderException e) {
             // fall thru, it means there is no QR code in image
+            return null;
         }
+    }
+
+    private BufferedImage getFramedImage(BufferedImage image, CroppedDimension cropped) {
+        BufferedImage clone = new BufferedImage(image.getWidth(), image.getHeight(), BufferedImage.TYPE_INT_RGB);
+        Graphics2D g2d = (Graphics2D)clone.getGraphics();
+        g2d.drawImage(image, 0, 0, null);
+        float[] dash1 = {10.0f};
+        g2d.setColor(Color.BLACK);
+        g2d.setStroke(new BasicStroke(resolution == WebcamResolution.HD ? 3.0f : 1.5f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 10.0f, dash1, 0.0f));
+        g2d.draw(new RoundRectangle2D.Double(cropped.x, cropped.y, cropped.length, cropped.length, 10, 10));
+        g2d.dispose();
+        return clone;
+    }
+
+    private CroppedDimension getCroppedDimension(BufferedImage bufferedImage) {
+        int dimension = Math.min(bufferedImage.getWidth(), bufferedImage.getHeight());
+        int squareSize = dimension / 2;
+        int x = (bufferedImage.getWidth() - squareSize) / 2;
+        int y = (bufferedImage.getHeight() - squareSize) / 2;
+        return new CroppedDimension(x, y, squareSize);
     }
 
     public Result getResult() {
@@ -88,5 +193,33 @@ public class WebcamService extends Service<Image> {
 
     public void setResolution(WebcamResolution resolution) {
         this.resolution = resolution;
+    }
+
+    public WebcamDevice getDevice() {
+        return device;
+    }
+
+    public void setDevice(WebcamDevice device) {
+        this.device = device;
+    }
+
+    public boolean isOpening() {
+        return opening.get();
+    }
+
+    public BooleanProperty openingProperty() {
+        return opening;
+    }
+
+    private static class CroppedDimension {
+        public int x;
+        public int y;
+        public int length;
+
+        public CroppedDimension(int x, int y, int length) {
+            this.x = x;
+            this.y = y;
+            this.length = length;
+        }
     }
 }

@@ -1,25 +1,44 @@
 package com.sparrowwallet.sparrow.wallet;
 
 import com.google.common.eventbus.Subscribe;
+import com.samourai.whirlpool.client.whirlpool.beans.Pool;
 import com.sparrowwallet.drongo.BitcoinUnit;
+import com.sparrowwallet.drongo.KeyPurpose;
+import com.sparrowwallet.drongo.SecureString;
+import com.sparrowwallet.drongo.address.Address;
 import com.sparrowwallet.drongo.address.InvalidAddressException;
-import com.sparrowwallet.drongo.protocol.Transaction;
+import com.sparrowwallet.drongo.bip47.PaymentCode;
+import com.sparrowwallet.drongo.bip47.SecretPoint;
+import com.sparrowwallet.drongo.crypto.ECKey;
+import com.sparrowwallet.drongo.protocol.*;
 import com.sparrowwallet.drongo.psbt.PSBT;
 import com.sparrowwallet.drongo.wallet.*;
+import com.sparrowwallet.sparrow.UnitFormat;
 import com.sparrowwallet.sparrow.AppServices;
 import com.sparrowwallet.sparrow.CurrencyRate;
 import com.sparrowwallet.sparrow.EventManager;
 import com.sparrowwallet.sparrow.control.*;
 import com.sparrowwallet.sparrow.event.*;
+import com.sparrowwallet.sparrow.glyphfont.FontAwesome5;
 import com.sparrowwallet.sparrow.io.Config;
-import com.sparrowwallet.sparrow.net.ExchangeSource;
-import com.sparrowwallet.sparrow.net.ElectrumServer;
-import com.sparrowwallet.sparrow.net.MempoolRateSize;
+import com.sparrowwallet.sparrow.io.Storage;
+import com.sparrowwallet.sparrow.net.*;
+import com.sparrowwallet.sparrow.paynym.PayNym;
+import com.sparrowwallet.sparrow.soroban.InitiatorDialog;
+import com.sparrowwallet.sparrow.paynym.PayNymAddress;
+import com.sparrowwallet.sparrow.soroban.SorobanServices;
+import com.sparrowwallet.sparrow.whirlpool.Whirlpool;
+import javafx.animation.KeyFrame;
+import javafx.animation.Timeline;
 import javafx.application.Platform;
+import javafx.beans.binding.Bindings;
 import javafx.beans.property.*;
 import javafx.beans.value.ChangeListener;
 import javafx.beans.value.ObservableValue;
+import javafx.beans.value.WeakChangeListener;
 import javafx.collections.ListChangeListener;
+import javafx.concurrent.Service;
+import javafx.concurrent.Task;
 import javafx.event.ActionEvent;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
@@ -27,7 +46,11 @@ import javafx.fxml.Initializable;
 import javafx.scene.Node;
 import javafx.scene.control.*;
 import javafx.scene.layout.StackPane;
+import javafx.scene.layout.VBox;
+import javafx.stage.Modality;
+import javafx.util.Duration;
 import javafx.util.StringConverter;
+import org.controlsfx.glyphfont.Glyph;
 import org.controlsfx.validation.ValidationResult;
 import org.controlsfx.validation.ValidationSupport;
 import org.controlsfx.validation.Validator;
@@ -39,18 +62,14 @@ import tornadofx.control.Field;
 import java.io.IOException;
 import java.net.URL;
 import java.text.DecimalFormat;
-import java.text.DecimalFormatSymbols;
 import java.util.*;
-import java.util.function.Function;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+
+import static com.sparrowwallet.sparrow.AppServices.*;
 
 public class SendController extends WalletFormController implements Initializable {
     private static final Logger log = LoggerFactory.getLogger(SendController.class);
-
-    public static final List<Integer> TARGET_BLOCKS_RANGE = List.of(1, 2, 3, 4, 5, 10, 25, 50, 100, 500);
-    public static final List<Long> FEE_RATES_RANGE = List.of(1L, 2L, 4L, 8L, 16L, 32L, 64L, 128L, 256L, 512L, 1024L);
-
-    public static final double FALLBACK_FEE_RATE = 20000d / 1000;
 
     @FXML
     private TabPane paymentTabs;
@@ -80,6 +99,15 @@ public class SendController extends WalletFormController implements Initializabl
     private CopyableLabel feeRate;
 
     @FXML
+    private Label cpfpFeeRate;
+
+    @FXML
+    private Label feeRatePriority;
+
+    @FXML
+    private Glyph feeRatePriorityGlyph;
+
+    @FXML
     private TextField fee;
 
     @FXML
@@ -98,10 +126,31 @@ public class SendController extends WalletFormController implements Initializabl
     private TransactionDiagram transactionDiagram;
 
     @FXML
+    private ToggleGroup optimizationToggleGroup;
+
+    @FXML
+    private ToggleButton efficiencyToggle;
+
+    @FXML
+    private ToggleButton privacyToggle;
+
+    @FXML
+    private HelpLabel optimizationHelp;
+
+    @FXML
+    private Label privacyAnalysis;
+
+    @FXML
     private Button clearButton;
 
     @FXML
     private Button createButton;
+
+    @FXML
+    private Button premixButton;
+
+    @FXML
+    private Button notificationButton;
 
     private StackPane tabHeader;
 
@@ -111,15 +160,23 @@ public class SendController extends WalletFormController implements Initializabl
 
     private final ObjectProperty<UtxoFilter> utxoFilterProperty = new SimpleObjectProperty<>(null);
 
-    private final ObjectProperty<WalletTransaction> walletTransactionProperty = new SimpleObjectProperty<>(null);
+    private final ObjectProperty<Pool> whirlpoolProperty = new SimpleObjectProperty<>(null);
 
-    private final ObjectProperty<WalletTransaction> createdWalletTransactionProperty = new SimpleObjectProperty<>(null);
+    private final ObjectProperty<PaymentCode> paymentCodeProperty = new SimpleObjectProperty<>(null);
+
+    private final ObjectProperty<WalletTransaction> walletTransactionProperty = new SimpleObjectProperty<>(null);
 
     private final BooleanProperty insufficientInputsProperty = new SimpleBooleanProperty(false);
 
     private final StringProperty utxoLabelSelectionProperty = new SimpleStringProperty("");
 
-    private final BooleanProperty includeMempoolInputsProperty = new SimpleBooleanProperty(false);
+    private final BooleanProperty includeSpentMempoolOutputsProperty = new SimpleBooleanProperty(false);
+
+    private final List<byte[]> opReturnsList = new ArrayList<>();
+
+    private final Set<WalletNode> excludedChangeNodes = new HashSet<>();
+
+    private final Map<Wallet, Map<Address, WalletNode>> addressNodeMap = new HashMap<>();
 
     private final ChangeListener<String> feeListener = new ChangeListener<>() {
         @Override
@@ -155,7 +212,7 @@ public class SendController extends WalletFormController implements Initializabl
             userFeeSet.set(false);
             for(Tab tab : paymentTabs.getTabs()) {
                 PaymentController controller = (PaymentController)tab.getUserData();
-                controller.revalidate();
+                controller.revalidateAmount();
             }
             updateTransaction();
         }
@@ -168,13 +225,22 @@ public class SendController extends WalletFormController implements Initializabl
             userFeeSet.set(false);
             for(Tab tab : paymentTabs.getTabs()) {
                 PaymentController controller = (PaymentController)tab.getUserData();
-                controller.revalidate();
+                controller.revalidateAmount();
             }
             updateTransaction();
         }
     };
 
+    private final ChangeListener<Boolean> broadcastButtonsOnlineListener = (observable, oldValue, newValue) -> {
+        premixButton.setDisable(!newValue);
+        notificationButton.setDisable(walletTransactionProperty.get() == null || isInsufficientFeeRate() || !newValue);
+    };
+
     private ValidationSupport validationSupport;
+
+    private WalletTransactionService walletTransactionService;
+
+    private boolean overrideOptimizationStrategy;
 
     @Override
     public void initialize(URL location, ResourceBundle resources) {
@@ -197,7 +263,10 @@ public class SendController extends WalletFormController implements Initializabl
                 if(!paymentTabs.getStyleClass().contains("multiple-tabs")) {
                     paymentTabs.getStyleClass().add("multiple-tabs");
                 }
-                paymentTabs.getTabs().forEach(tab -> tab.setClosable(true));
+                paymentTabs.getTabs().forEach(tab -> {
+                    tab.setClosable(true);
+                    ((PaymentController)tab.getUserData()).updateMixOnlyStatus();
+                });
             } else {
                 paymentTabs.getStyleClass().remove("multiple-tabs");
                 Tab remainingTab = paymentTabs.getTabs().get(0);
@@ -211,7 +280,7 @@ public class SendController extends WalletFormController implements Initializabl
         insufficientInputsProperty.addListener((observable, oldValue, newValue) -> {
             for(Tab tab : paymentTabs.getTabs()) {
                 PaymentController controller = (PaymentController)tab.getUserData();
-                controller.revalidate();
+                controller.revalidateAmount();
             }
             revalidate(fee, feeListener);
         });
@@ -272,17 +341,21 @@ public class SendController extends WalletFormController implements Initializabl
         }
 
         FeeRatesSelection feeRatesSelection = Config.get().getFeeRatesSelection();
-        feeRatesSelection = (feeRatesSelection == null ? FeeRatesSelection.BLOCK_TARGET : feeRatesSelection);
+        feeRatesSelection = (feeRatesSelection == null ? FeeRatesSelection.MEMPOOL_SIZE : feeRatesSelection);
+        cpfpFeeRate.managedProperty().bind(cpfpFeeRate.visibleProperty());
+        cpfpFeeRate.setVisible(false);
         setDefaultFeeRate();
         updateFeeRateSelection(feeRatesSelection);
         feeSelectionToggleGroup.selectToggle(feeRatesSelection == FeeRatesSelection.BLOCK_TARGET ? targetBlocksToggle : mempoolSizeToggle);
         feeSelectionToggleGroup.selectedToggleProperty().addListener((observable, oldValue, newValue) -> {
-            FeeRatesSelection newFeeRatesSelection = (FeeRatesSelection)newValue.getUserData();
-            Config.get().setFeeRatesSelection(newFeeRatesSelection);
-            EventManager.get().post(new FeeRatesSelectionChangedEvent(newFeeRatesSelection));
+            if(newValue != null) {
+                FeeRatesSelection newFeeRatesSelection = (FeeRatesSelection)newValue.getUserData();
+                Config.get().setFeeRatesSelection(newFeeRatesSelection);
+                EventManager.get().post(new FeeRatesSelectionChangedEvent(getWalletForm().getWallet(), newFeeRatesSelection));
+            };
         });
 
-        fee.setTextFormatter(new CoinTextFormatter());
+        fee.setTextFormatter(new CoinTextFormatter(Config.get().getUnitFormat()));
         fee.textProperty().addListener(feeListener);
 
         BitcoinUnit unit = getBitcoinUnit(Config.get().getBitcoinUnit());
@@ -321,31 +394,63 @@ public class SendController extends WalletFormController implements Initializabl
 
         walletTransactionProperty.addListener((observable, oldValue, walletTransaction) -> {
             if(walletTransaction != null) {
-                setPayments(walletTransaction.getPayments());
+                setPayments(walletTransaction.getPayments().stream().filter(payment -> payment.getType() != Payment.Type.FAKE_MIX).collect(Collectors.toList()));
 
                 double feeRate = walletTransaction.getFeeRate();
                 if(userFeeSet.get()) {
                     setTargetBlocks(getTargetBlocks(feeRate));
                     setFeeRangeRate(feeRate);
+                    revalidate(fee, feeListener);
                 } else {
                     setFeeValueSats(walletTransaction.getFee());
                 }
 
                 setFeeRate(feeRate);
+                setEffectiveFeeRate(walletTransaction);
             }
 
             transactionDiagram.update(walletTransaction);
-            createButton.setDisable(walletTransaction == null || isInsufficientFeeRate());
+            updatePrivacyAnalysis(walletTransaction);
+            createButton.setDisable(walletTransaction == null || isInsufficientFeeRate() || isPayNymMixOnlyPayment(walletTransaction.getPayments()));
+            notificationButton.setDisable(walletTransaction == null || isInsufficientFeeRate() || !AppServices.isConnected());
         });
 
         transactionDiagram.sceneProperty().addListener((observable, oldScene, newScene) -> {
             if(oldScene == null && newScene != null) {
-                transactionDiagram.update(null);
+                transactionDiagram.update(walletTransactionProperty.get());
                 newScene.getWindow().heightProperty().addListener((observable1, oldValue, newValue) -> {
                     transactionDiagram.update(walletTransactionProperty.get());
                 });
             }
         });
+
+        addFeeRangeTrackHighlight(0);
+
+        efficiencyToggle.setOnAction(event -> {
+            if(getWalletForm().getWallet().isWhirlpoolMixWallet() && !overrideOptimizationStrategy) {
+                AppServices.showWarningDialog("Privacy may be lost!", "It is recommended to optimize for privacy when sending coinjoined outputs.");
+                overrideOptimizationStrategy = true;
+            }
+            Config.get().setSendOptimizationStrategy(OptimizationStrategy.EFFICIENCY);
+            updateTransaction();
+        });
+        privacyToggle.setOnAction(event -> {
+            Config.get().setSendOptimizationStrategy(OptimizationStrategy.PRIVACY);
+            updateTransaction();
+        });
+        setPreferredOptimizationStrategy();
+        updatePrivacyAnalysis(null);
+        optimizationHelp.managedProperty().bind(optimizationHelp.visibleProperty());
+        privacyAnalysis.managedProperty().bind(privacyAnalysis.visibleProperty());
+        optimizationHelp.visibleProperty().bind(privacyAnalysis.visibleProperty().not());
+
+        createButton.managedProperty().bind(createButton.visibleProperty());
+        premixButton.managedProperty().bind(premixButton.visibleProperty());
+        notificationButton.managedProperty().bind(notificationButton.visibleProperty());
+        createButton.visibleProperty().bind(Bindings.and(premixButton.visibleProperty().not(), notificationButton.visibleProperty().not()));
+        premixButton.setVisible(false);
+        notificationButton.setVisible(false);
+        AppServices.onlineProperty().addListener(new WeakChangeListener<>(broadcastButtonsOnlineListener));
     }
 
     private void initializeTabHeader(int count) {
@@ -355,7 +460,7 @@ public class SendController extends WalletFormController implements Initializabl
             if(stackPane != null) {
                 tabHeader = stackPane;
                 tabHeader.managedProperty().bind(tabHeader.visibleProperty());
-                tabHeader.setVisible(false);
+                tabHeader.setVisible(paymentTabs.getTabs().size() > 1);
                 paymentTabs.getStyleClass().remove("initial");
             } else if(lookupCount < 20) {
                 initializeTabHeader(lookupCount+1);
@@ -377,13 +482,13 @@ public class SendController extends WalletFormController implements Initializabl
 
     private void addValidation() {
         validationSupport = new ValidationSupport();
+        validationSupport.setValidationDecorator(new StyleClassValidationDecoration());
         validationSupport.registerValidator(fee, Validator.combine(
                 (Control c, String newValue) -> ValidationResult.fromErrorIf( c, "Insufficient Inputs", userFeeSet.get() && insufficientInputsProperty.get()),
                 (Control c, String newValue) -> ValidationResult.fromErrorIf( c, "Insufficient Fee", getFeeValueSats() != null && getFeeValueSats() == 0),
                 (Control c, String newValue) -> ValidationResult.fromErrorIf( c, "Insufficient Fee Rate", isInsufficientFeeRate())
         ));
 
-        validationSupport.setValidationDecorator(new StyleClassValidationDecoration());
         validationSupport.setErrorDecorationEnabled(false);
     }
 
@@ -445,7 +550,8 @@ public class SendController extends WalletFormController implements Initializabl
         try {
             if(paymentTabs.getTabs().size() == 1) {
                 PaymentController controller = (PaymentController)paymentTabs.getTabs().get(0).getUserData();
-                updateTransaction(List.of(controller.getPayment(sendAll)));
+                controller.setSendMax(sendAll);
+                updateTransaction(List.of(controller.getPayment()));
             } else {
                 updateTransaction(null);
             }
@@ -455,49 +561,154 @@ public class SendController extends WalletFormController implements Initializabl
     }
 
     public void updateTransaction(List<Payment> transactionPayments) {
+        if(walletTransactionService != null && walletTransactionService.isRunning()) {
+            walletTransactionService.setIgnoreResult(true);
+            walletTransactionService.cancel();
+        }
+
         try {
             List<Payment> payments = transactionPayments != null ? transactionPayments : getPayments();
+            updateOptimizationButtons(payments);
             if(!userFeeSet.get() || (getFeeValueSats() != null && getFeeValueSats() > 0)) {
                 Wallet wallet = getWalletForm().getWallet();
                 Long userFee = userFeeSet.get() ? getFeeValueSats() : null;
+                double feeRate = getUserFeeRate();
                 Integer currentBlockHeight = AppServices.getCurrentBlockHeight();
                 boolean groupByAddress = Config.get().isGroupByAddress();
-                boolean includeMempoolChange = Config.get().isIncludeMempoolChange();
-                boolean includeMempoolInputs = includeMempoolInputsProperty.get();
-                WalletTransaction walletTransaction = wallet.createWalletTransaction(getUtxoSelectors(), getUtxoFilters(), payments, getFeeRate(), getMinimumFeeRate(), userFee, currentBlockHeight, groupByAddress, includeMempoolChange, includeMempoolInputs);
-                walletTransactionProperty.setValue(walletTransaction);
-                insufficientInputsProperty.set(false);
+                boolean includeMempoolOutputs = Config.get().isIncludeMempoolOutputs();
+                boolean includeSpentMempoolOutputs = includeSpentMempoolOutputsProperty.get();
 
-                return;
+                walletTransactionService = new WalletTransactionService(addressNodeMap, wallet, getUtxoSelectors(payments), getUtxoFilters(),
+                        payments, opReturnsList, excludedChangeNodes,
+                        feeRate, getMinimumFeeRate(), userFee, currentBlockHeight, groupByAddress, includeMempoolOutputs, includeSpentMempoolOutputs);
+                walletTransactionService.setOnSucceeded(event -> {
+                    if(!walletTransactionService.isIgnoreResult()) {
+                        walletTransactionProperty.setValue(walletTransactionService.getValue());
+                        insufficientInputsProperty.set(false);
+                    }
+                });
+                walletTransactionService.setOnFailed(event -> {
+                    if(!walletTransactionService.isIgnoreResult()) {
+                        transactionDiagram.clear();
+                        walletTransactionProperty.setValue(null);
+                        if(event.getSource().getException() instanceof InsufficientFundsException) {
+                            insufficientInputsProperty.set(true);
+                        }
+                    }
+                });
+
+                final WalletTransactionService currentWalletTransactionService = walletTransactionService;
+                final KeyFrame delay = new KeyFrame(Duration.millis(200), e -> {
+                    if(currentWalletTransactionService.isRunning()) {
+                        transactionDiagram.update(currentWalletTransactionService.getMessage());
+                        currentWalletTransactionService.messageProperty().addListener((observable1, oldValue, newValue) -> {
+                            if(currentWalletTransactionService.isRunning()) {
+                                transactionDiagram.update(newValue);
+                            }
+                        });
+                        createButton.setDisable(true);
+                        notificationButton.setDisable(true);
+                    }
+                });
+                final Timeline timeline = new Timeline(delay);
+                timeline.play();
+
+                walletTransactionService.start();
             }
         } catch(InvalidAddressException | IllegalStateException e) {
-            //ignore
-        } catch(InsufficientFundsException e) {
-            insufficientInputsProperty.set(true);
+            walletTransactionProperty.setValue(null);
         }
-
-        walletTransactionProperty.setValue(null);
     }
 
-    private List<UtxoSelector> getUtxoSelectors() throws InvalidAddressException {
+    private List<UtxoSelector> getUtxoSelectors(List<Payment> payments) throws InvalidAddressException {
         if(utxoSelectorProperty.get() != null) {
             return List.of(utxoSelectorProperty.get());
         }
 
         Wallet wallet = getWalletForm().getWallet();
-        long noInputsFee = wallet.getNoInputsFee(getPayments(), getFeeRate());
-        long costOfChange = wallet.getCostOfChange(getFeeRate(), getMinimumFeeRate());
+        long noInputsFee = wallet.getNoInputsFee(getPayments(), getUserFeeRate());
+        long costOfChange = wallet.getCostOfChange(getUserFeeRate(), getMinimumFeeRate());
 
-        return List.of(new BnBUtxoSelector(noInputsFee, costOfChange), new KnapsackUtxoSelector(noInputsFee));
+        List<UtxoSelector> selectors = new ArrayList<>();
+        OptimizationStrategy optimizationStrategy = (OptimizationStrategy)optimizationToggleGroup.getSelectedToggle().getUserData();
+        if(optimizationStrategy == OptimizationStrategy.PRIVACY
+                && payments.size() == 1
+                && (payments.get(0).getAddress().getScriptType() == getWalletForm().getWallet().getFreshNode(KeyPurpose.RECEIVE).getAddress().getScriptType())
+                && !(payments.get(0).getAddress() instanceof PayNymAddress)) {
+            selectors.add(new StonewallUtxoSelector(payments.get(0).getAddress().getScriptType(), noInputsFee));
+        }
+
+        selectors.addAll(List.of(new BnBUtxoSelector(noInputsFee, costOfChange), new KnapsackUtxoSelector(noInputsFee)));
+        return selectors;
+    }
+
+    private static class WalletTransactionService extends Service<WalletTransaction> {
+        private final Map<Wallet, Map<Address, WalletNode>> addressNodeMap;
+        private final Wallet wallet;
+        private final List<UtxoSelector> utxoSelectors;
+        private final List<UtxoFilter> utxoFilters;
+        private final List<Payment> payments;
+        private final List<byte[]> opReturns;
+        private final Set<WalletNode> excludedChangeNodes;
+        private final double feeRate;
+        private final double longTermFeeRate;
+        private final Long fee;
+        private final Integer currentBlockHeight;
+        private final boolean groupByAddress;
+        private final boolean includeMempoolOutputs;
+        private final boolean includeSpentMempoolOutputs;
+        private boolean ignoreResult;
+
+        public WalletTransactionService(Map<Wallet, Map<Address, WalletNode>> addressNodeMap,
+                                        Wallet wallet, List<UtxoSelector> utxoSelectors, List<UtxoFilter> utxoFilters,
+                                        List<Payment> payments, List<byte[]> opReturns, Set<WalletNode> excludedChangeNodes,
+                                        double feeRate, double longTermFeeRate, Long fee, Integer currentBlockHeight, boolean groupByAddress, boolean includeMempoolOutputs, boolean includeSpentMempoolOutputs) {
+            this.addressNodeMap = addressNodeMap;
+            this.wallet = wallet;
+            this.utxoSelectors = utxoSelectors;
+            this.utxoFilters = utxoFilters;
+            this.payments = payments;
+            this.opReturns = opReturns;
+            this.excludedChangeNodes = excludedChangeNodes;
+            this.feeRate = feeRate;
+            this.longTermFeeRate = longTermFeeRate;
+            this.fee = fee;
+            this.currentBlockHeight = currentBlockHeight;
+            this.groupByAddress = groupByAddress;
+            this.includeMempoolOutputs = includeMempoolOutputs;
+            this.includeSpentMempoolOutputs = includeSpentMempoolOutputs;
+        }
+
+        @Override
+        protected Task<WalletTransaction> createTask() {
+            return new Task<>() {
+                protected WalletTransaction call() throws InsufficientFundsException {
+                    updateMessage("Selecting UTXOs...");
+                    WalletTransaction walletTransaction = wallet.createWalletTransaction(utxoSelectors, utxoFilters, payments, opReturns, excludedChangeNodes,
+                            feeRate, longTermFeeRate, fee, currentBlockHeight, groupByAddress, includeMempoolOutputs, includeSpentMempoolOutputs);
+                    updateMessage("Deriving keys...");
+                    walletTransaction.updateAddressNodeMap(addressNodeMap, walletTransaction.getWallet());
+                    return walletTransaction;
+                }
+            };
+        }
+
+        public boolean isIgnoreResult() {
+            return ignoreResult;
+        }
+
+        public void setIgnoreResult(boolean ignoreResult) {
+            this.ignoreResult = ignoreResult;
+        }
     }
 
     private List<UtxoFilter> getUtxoFilters() {
         UtxoFilter utxoFilter = utxoFilterProperty.get();
         if(utxoFilter != null) {
-            return List.of(utxoFilter, new FrozenUtxoFilter());
+            return List.of(utxoFilter, new FrozenUtxoFilter(), new CoinbaseUtxoFilter(getWalletForm().getWallet()));
         }
 
-        return List.of(new FrozenUtxoFilter());
+        return List.of(new FrozenUtxoFilter(), new CoinbaseUtxoFilter(getWalletForm().getWallet()));
     }
 
     private void updateFeeRateSelection(FeeRatesSelection feeRatesSelection) {
@@ -527,8 +738,13 @@ public class SendController extends WalletFormController implements Initializabl
     }
 
     private Long getFeeValueSats(BitcoinUnit bitcoinUnit) {
+        return getFeeValueSats(Config.get().getUnitFormat(), bitcoinUnit);
+    }
+
+    private Long getFeeValueSats(UnitFormat unitFormat, BitcoinUnit bitcoinUnit) {
         if(fee.getText() != null && !fee.getText().isEmpty()) {
-            double fieldValue = Double.parseDouble(fee.getText().replaceAll(",", ""));
+            UnitFormat format = unitFormat == null ? UnitFormat.DOT : unitFormat;
+            double fieldValue = Double.parseDouble(fee.getText().replaceAll(Pattern.quote(format.getGroupingSeparator()), "").replaceAll(",", "."));
             return bitcoinUnit.getSatsValue(fieldValue);
         }
 
@@ -537,7 +753,8 @@ public class SendController extends WalletFormController implements Initializabl
 
     private void setFeeValueSats(long feeValue) {
         fee.textProperty().removeListener(feeListener);
-        DecimalFormat df = new DecimalFormat("#.#", DecimalFormatSymbols.getInstance(Locale.ENGLISH));
+        UnitFormat unitFormat = Config.get().getUnitFormat() == null ? UnitFormat.DOT : Config.get().getUnitFormat();
+        DecimalFormat df = new DecimalFormat("#.#", unitFormat.getDecimalFormatSymbols());
         df.setMaximumFractionDigits(8);
         fee.setText(df.format(feeAmountUnit.getValue().getValue(feeValue)));
         fee.textProperty().addListener(feeListener);
@@ -553,10 +770,12 @@ public class SendController extends WalletFormController implements Initializabl
         Map<Integer, Double> targetBlocksFeeRates = getTargetBlocksFeeRates();
         int maxTargetBlocks = 1;
         for(Integer targetBlocks : targetBlocksFeeRates.keySet()) {
-            maxTargetBlocks = Math.max(maxTargetBlocks, targetBlocks);
-            Double candidate = targetBlocksFeeRates.get(targetBlocks);
-            if(Math.round(feeRate) >= Math.round(candidate)) {
-                return targetBlocks;
+            if(TARGET_BLOCKS_RANGE.contains(targetBlocks)) {
+                maxTargetBlocks = Math.max(maxTargetBlocks, targetBlocks);
+                Double candidate = targetBlocksFeeRates.get(targetBlocks);
+                if(Math.round(feeRate) >= Math.round(candidate)) {
+                    return targetBlocks;
+                }
             }
         }
 
@@ -594,6 +813,17 @@ public class SendController extends WalletFormController implements Initializabl
         feeRange.valueProperty().addListener(feeRangeListener);
     }
 
+    /**
+     * This method retrieves the fee rate used as input to constructing the transaction.
+     * Where the user has set a custom fee amount, using the slider fee rate can mean the UTXO selectors underestimate the UTXO effective values and fail to find a solution
+     * In this case, use a fee rate of 1 sat/VB for maximum flexibility
+     *
+     * @return the fee rate to use when constructing a transaction
+     */
+    public Double getUserFeeRate() {
+        return (userFeeSet.get() ? Transaction.DEFAULT_MIN_RELAY_FEE : getFeeRate());
+    }
+
     public Double getFeeRate() {
         if(targetBlocksField.isVisible()) {
             return getTargetBlocksFeeRates().get(getTargetBlocks());
@@ -617,7 +847,85 @@ public class SendController extends WalletFormController implements Initializabl
     }
 
     private void setFeeRate(Double feeRateAmt) {
-        feeRate.setText(String.format("%.2f", feeRateAmt) + " gros/vByte");
+        feeRate.setText(String.format("%.2f", feeRateAmt) + " gros/vB");
+        setFeeRatePriority(feeRateAmt);
+    }
+
+    private void setEffectiveFeeRate(WalletTransaction walletTransaction) {
+        List<BlockTransaction> unconfirmedUtxoTxs = walletTransaction.getSelectedUtxos().keySet().stream().filter(ref -> ref.getHeight() <= 0)
+                .map(ref -> getWalletForm().getWallet().getWalletTransaction(ref.getHash())).filter(Objects::nonNull).distinct().collect(Collectors.toList());
+        if(!unconfirmedUtxoTxs.isEmpty()) {
+            long utxoTxFee = unconfirmedUtxoTxs.stream().mapToLong(BlockTransaction::getFee).sum();
+            double utxoTxSize = unconfirmedUtxoTxs.stream().mapToDouble(blkTx -> blkTx.getTransaction().getVirtualSize()).sum();
+            long thisFee = walletTransaction.getFee();
+            double thisSize = walletTransaction.getTransaction().getVirtualSize();
+            double effectiveRate = (utxoTxFee + thisFee) / (utxoTxSize + thisSize);
+            Tooltip tooltip = new Tooltip("Child Pays For Parent\n" + String.format("%.2f", effectiveRate) + " sats/vB effective rate");
+            cpfpFeeRate.setTooltip(tooltip);
+            cpfpFeeRate.setVisible(true);
+        } else {
+            cpfpFeeRate.setVisible(false);
+        }
+    }
+
+    private void setFeeRatePriority(Double feeRateAmt) {
+        Map<Integer, Double> targetBlocksFeeRates = getTargetBlocksFeeRates();
+        Integer targetBlocks = getTargetBlocks(feeRateAmt);
+        if(targetBlocksFeeRates.get(Integer.MAX_VALUE) != null) {
+            Double minFeeRate = targetBlocksFeeRates.get(Integer.MAX_VALUE);
+            if(minFeeRate > 1.0 && feeRateAmt < minFeeRate) {
+                feeRatePriority.setText("Below Minimum");
+                feeRatePriority.setTooltip(new Tooltip("Transactions at this fee rate are currently being purged from the default sized mempool"));
+                feeRatePriorityGlyph.setStyle("-fx-text-fill: #a0a1a7cc");
+                feeRatePriorityGlyph.setIcon(FontAwesome5.Glyph.EXCLAMATION_CIRCLE);
+                return;
+            }
+
+            Double lowestBlocksRate = targetBlocksFeeRates.get(TARGET_BLOCKS_RANGE.get(TARGET_BLOCKS_RANGE.size() - 1));
+            if(lowestBlocksRate >= minFeeRate && feeRateAmt < (minFeeRate + ((lowestBlocksRate - minFeeRate) / 2)) && !isPayjoinTx()) {
+                feeRatePriority.setText("Try Then Replace");
+                feeRatePriority.setTooltip(new Tooltip("Send a transaction, verify it appears in the destination wallet, then RBF to get it confirmed or sent to another address"));
+                feeRatePriorityGlyph.setStyle("-fx-text-fill: #7eb7c9cc");
+                feeRatePriorityGlyph.setIcon(FontAwesome5.Glyph.PLUS_CIRCLE);
+                return;
+            }
+        }
+
+        if(targetBlocks != null) {
+            if(targetBlocks < FeeRatesSource.BLOCKS_IN_HALF_HOUR) {
+                Double maxFeeRate = FEE_RATES_RANGE.get(FEE_RATES_RANGE.size() - 1).doubleValue();
+                Double highestBlocksRate = targetBlocksFeeRates.get(TARGET_BLOCKS_RANGE.get(0));
+                if(highestBlocksRate < maxFeeRate && feeRateAmt > (highestBlocksRate + ((maxFeeRate - highestBlocksRate) / 10))) {
+                    feeRatePriority.setText("Overpaid");
+                    feeRatePriority.setTooltip(new Tooltip("Transaction fees at this rate are likely higher than necessary"));
+                    feeRatePriorityGlyph.setStyle("-fx-text-fill: #c8416499");
+                    feeRatePriorityGlyph.setIcon(FontAwesome5.Glyph.EXCLAMATION_CIRCLE);
+                } else {
+                    feeRatePriority.setText("High Priority");
+                    feeRatePriority.setTooltip(new Tooltip("Typically confirms within minutes"));
+                    feeRatePriorityGlyph.setStyle("-fx-text-fill: #c8416499");
+                    feeRatePriorityGlyph.setIcon(FontAwesome5.Glyph.CIRCLE);
+                }
+            } else if(targetBlocks < FeeRatesSource.BLOCKS_IN_HOUR) {
+                feeRatePriority.setText("Medium Priority");
+                feeRatePriority.setTooltip(new Tooltip("Typically confirms within an hour or two"));
+                feeRatePriorityGlyph.setStyle("-fx-text-fill: #fba71b99");
+                feeRatePriorityGlyph.setIcon(FontAwesome5.Glyph.CIRCLE);
+            } else {
+                feeRatePriority.setText("Low Priority");
+                feeRatePriority.setTooltip(new Tooltip("Typically confirms in a day or longer"));
+                feeRatePriorityGlyph.setStyle("-fx-text-fill: #41a9c999");
+                feeRatePriorityGlyph.setIcon(FontAwesome5.Glyph.CIRCLE);
+            }
+        }
+    }
+
+    private boolean isPayjoinTx() {
+        if(walletTransactionProperty.get() != null) {
+            return walletTransactionProperty.get().getPayments().stream().anyMatch(payment -> AppServices.getPayjoinURI(payment.getAddress()) != null);
+        }
+
+        return false;
     }
 
     private Node getSliderThumb() {
@@ -628,6 +936,47 @@ public class SendController extends WalletFormController implements Initializabl
         if(amount != null && currencyRate != null && currencyRate.isAvailable()) {
             fiatFeeAmount.set(currencyRate, amount);
         }
+    }
+
+    private void addFeeRangeTrackHighlight(int count) {
+        Platform.runLater(() -> {
+            Node track = feeRange.lookup(".track");
+            if(track != null) {
+                Map<Integer, Double> targetBlocksFeeRates = getTargetBlocksFeeRates();
+                String highlight = "";
+                if(targetBlocksFeeRates.get(Integer.MAX_VALUE) != null) {
+                    highlight += "#a0a1a766 " + getPercentageOfFeeRange(targetBlocksFeeRates.get(Integer.MAX_VALUE)) + "%, ";
+                }
+                highlight += "#41a9c966 " + getPercentageOfFeeRange(targetBlocksFeeRates, FeeRatesSource.BLOCKS_IN_TWO_HOURS - 1) + "%, ";
+                highlight += "#fba71b66 " + getPercentageOfFeeRange(targetBlocksFeeRates, FeeRatesSource.BLOCKS_IN_HOUR - 1) + "%, ";
+                highlight += "#c8416466 " + getPercentageOfFeeRange(targetBlocksFeeRates, FeeRatesSource.BLOCKS_IN_HALF_HOUR - 1) + "%";
+
+                track.setStyle("-fx-background-color: " +
+                        "-fx-shadow-highlight-color, " +
+                        "linear-gradient(to bottom, derive(-fx-text-box-border, -10%), -fx-text-box-border), " +
+                        "linear-gradient(to bottom, derive(-fx-control-inner-background, -9%), derive(-fx-control-inner-background, 0%), derive(-fx-control-inner-background, -5%), derive(-fx-control-inner-background, -12%)), " +
+                        "linear-gradient(to right, " + highlight + ")");
+            } else if(count < 20) {
+                addFeeRangeTrackHighlight(count+1);
+            }
+        });
+    }
+
+    private int getPercentageOfFeeRange(Map<Integer, Double> targetBlocksFeeRates, Integer minTargetBlocks) {
+        List<Integer> rates = new ArrayList<>(targetBlocksFeeRates.keySet());
+        Collections.reverse(rates);
+        for(Integer targetBlocks : rates) {
+            if(targetBlocks < minTargetBlocks) {
+                return getPercentageOfFeeRange(targetBlocksFeeRates.get(targetBlocks));
+            }
+        }
+
+        return 100;
+    }
+
+    private int getPercentageOfFeeRange(Double feeRate) {
+        double index = Math.log(feeRate) / Math.log(2);
+        return (int)Math.round(index * 10.0);
     }
 
     private void updateMaxClearButtons(UtxoSelector utxoSelector, UtxoFilter utxoFilter) {
@@ -643,6 +992,68 @@ public class SendController extends WalletFormController implements Initializabl
             utxoLabelSelectionProperty.set(exclusion);
         } else {
             utxoLabelSelectionProperty.set("");
+        }
+    }
+
+    private boolean isPayNymMixOnlyPayment(List<Payment> payments) {
+        return payments.size() == 1 && payments.get(0).getAddress() instanceof PayNymAddress;
+    }
+
+    public void setPayNymMixOnlyPayment() {
+        optimizationToggleGroup.selectToggle(privacyToggle);
+        transactionDiagram.setOptimizationStrategy(OptimizationStrategy.PRIVACY);
+        efficiencyToggle.setDisable(true);
+        privacyToggle.setDisable(false);
+    }
+
+    private boolean isMixPossible(List<Payment> payments) {
+        return (utxoSelectorProperty.get() == null || SorobanServices.canWalletMix(walletForm.getWallet()))
+                && payments.size() == 1
+                && (payments.get(0).getAddress().getScriptType() == getWalletForm().getWallet().getFreshNode(KeyPurpose.RECEIVE).getAddress().getScriptType())
+                && AppServices.getPayjoinURI(payments.get(0).getAddress()) == null;
+    }
+
+    private void updateOptimizationButtons(List<Payment> payments) {
+        if(isPayNymMixOnlyPayment(payments)) {
+            setPayNymMixOnlyPayment();
+        } else if(isMixPossible(payments)) {
+            setPreferredOptimizationStrategy();
+            efficiencyToggle.setDisable(false);
+            privacyToggle.setDisable(false);
+        } else {
+            optimizationToggleGroup.selectToggle(efficiencyToggle);
+            transactionDiagram.setOptimizationStrategy(OptimizationStrategy.EFFICIENCY);
+            efficiencyToggle.setDisable(false);
+            privacyToggle.setDisable(true);
+        }
+    }
+
+    private OptimizationStrategy getPreferredOptimizationStrategy() {
+        OptimizationStrategy optimizationStrategy = Config.get().getSendOptimizationStrategy();
+        if(getWalletForm().getWallet().isWhirlpoolMixWallet() && !overrideOptimizationStrategy) {
+            optimizationStrategy = OptimizationStrategy.PRIVACY;
+        }
+
+        return optimizationStrategy;
+    }
+
+    private void setPreferredOptimizationStrategy() {
+        OptimizationStrategy optimizationStrategy = getPreferredOptimizationStrategy();
+        optimizationToggleGroup.selectToggle(optimizationStrategy == OptimizationStrategy.PRIVACY ? privacyToggle : efficiencyToggle);
+        transactionDiagram.setOptimizationStrategy(optimizationStrategy);
+    }
+
+    private void updatePrivacyAnalysis(WalletTransaction walletTransaction) {
+        if(walletTransaction == null) {
+            privacyAnalysis.setVisible(false);
+            privacyAnalysis.setTooltip(null);
+        } else {
+            privacyAnalysis.setVisible(true);
+            Tooltip tooltip = new Tooltip();
+            tooltip.setShowDelay(new Duration(50));
+            tooltip.setShowDuration(Duration.INDEFINITE);
+            tooltip.setGraphic(new PrivacyAnalysisTooltip(walletTransaction));
+            privacyAnalysis.setTooltip(tooltip);
         }
     }
 
@@ -663,17 +1074,35 @@ public class SendController extends WalletFormController implements Initializabl
         fee.setText("");
         fee.textProperty().addListener(feeListener);
 
+        cpfpFeeRate.setVisible(false);
         fiatFeeAmount.setText("");
 
         userFeeSet.set(false);
         setDefaultFeeRate();
         utxoSelectorProperty.setValue(null);
         utxoFilterProperty.setValue(null);
-        includeMempoolInputsProperty.set(false);
+        includeSpentMempoolOutputsProperty.set(false);
+        opReturnsList.clear();
+        excludedChangeNodes.clear();
         walletTransactionProperty.setValue(null);
-        createdWalletTransactionProperty.set(null);
+        walletForm.setCreatedWalletTransaction(null);
+        insufficientInputsProperty.set(false);
 
         validationSupport.setErrorDecorationEnabled(false);
+
+        setInputFieldsDisabled(false, false);
+
+        efficiencyToggle.setDisable(false);
+        privacyToggle.setDisable(false);
+
+        premixButton.setVisible(false);
+        notificationButton.setVisible(false);
+        createButton.setDefaultButton(true);
+
+        whirlpoolProperty.set(null);
+        paymentCodeProperty.set(null);
+
+        addressNodeMap.clear();
     }
 
     public UtxoSelector getUtxoSelector() {
@@ -719,38 +1148,264 @@ public class SendController extends WalletFormController implements Initializabl
     private void revalidate(TextField field, ChangeListener<String> listener) {
         field.textProperty().removeListener(listener);
         String amt = field.getText();
+        int caret = field.getCaretPosition();
         field.setText(amt + "0");
         field.setText(amt);
+        field.positionCaret(caret);
         field.textProperty().addListener(listener);
     }
 
     public void createTransaction(ActionEvent event) {
+        WalletTransaction walletTransaction = walletTransactionProperty.get();
         if(log.isDebugEnabled()) {
-            Map<WalletNode, String> nodeHashes = walletTransactionProperty.get().getSelectedUtxos().values().stream().collect(Collectors.toMap(Function.identity(), node -> ElectrumServer.getScriptHash(walletForm.getWallet(), node)));
-            Map<WalletNode, String> changeHash = Collections.emptyMap();
-            if(walletTransactionProperty.get().getChangeNode() != null) {
-                changeHash = Map.of(walletTransactionProperty.get().getChangeNode(), ElectrumServer.getScriptHash(walletForm.getWallet(), walletTransactionProperty.get().getChangeNode()));
+            Map<WalletNode, List<String>> inputHashes = new LinkedHashMap<>();
+            for(WalletNode node : walletTransaction.getSelectedUtxos().values()) {
+                List<String> nodeHashes = inputHashes.computeIfAbsent(node, k -> new ArrayList<>());
+                nodeHashes.add(ElectrumServer.getScriptHash(node));
             }
-            log.debug("Creating tx " + walletTransactionProperty.get().getTransaction().getTxId() + ", expecting notifications for \ninputs \n" + nodeHashes + " and \nchange \n" + changeHash);
+            Map<WalletNode, List<String>> changeHash = new LinkedHashMap<>();
+            for(WalletNode changeNode : walletTransaction.getChangeMap().keySet()) {
+                changeHash.put(changeNode, List.of(ElectrumServer.getScriptHash(changeNode)));
+            }
+            log.debug("Creating tx " + walletTransaction.getTransaction().getTxId() + ", expecting notifications for \ninputs \n" + inputHashes + " and \nchange \n" + changeHash);
         }
 
         addWalletTransactionNodes();
-        createdWalletTransactionProperty.set(walletTransactionProperty.get());
-        PSBT psbt = walletTransactionProperty.get().createPSBT();
-        EventManager.get().post(new ViewPSBTEvent(createButton.getScene().getWindow(), walletTransactionProperty.get().getPayments().get(0).getLabel(), null, psbt));
+        walletForm.setCreatedWalletTransaction(walletTransaction);
+        PSBT psbt = walletTransaction.createPSBT();
+        EventManager.get().post(new ViewPSBTEvent(createButton.getScene().getWindow(), walletTransaction.getPayments().get(0).getLabel(), null, psbt));
     }
 
     private void addWalletTransactionNodes() {
         WalletTransaction walletTransaction = walletTransactionProperty.get();
         Set<WalletNode> nodes = new LinkedHashSet<>(walletTransaction.getSelectedUtxos().values());
-        if(walletTransaction.getChangeNode() != null) {
-            nodes.add(walletTransaction.getChangeNode());
-        }
-        List<WalletNode> consolidationNodes = walletTransaction.getConsolidationSendNodes();
-        nodes.addAll(consolidationNodes);
+        nodes.addAll(walletTransaction.getChangeMap().keySet());
+        Map<Address, WalletNode> addressNodeMap = walletTransaction.getAddressNodeMap();
+        nodes.addAll(addressNodeMap.values().stream().filter(Objects::nonNull).collect(Collectors.toList()));
 
         //All wallet nodes applicable to this transaction are stored so when the subscription status for one is updated, the history for all can be fetched in one atomic update
         walletForm.addWalletTransactionNodes(nodes);
+    }
+
+    public void broadcastPremix(ActionEvent event) {
+        //Ensure all child wallets have been saved
+        Wallet masterWallet = getWalletForm().getWallet().isMasterWallet() ? getWalletForm().getWallet() : getWalletForm().getWallet().getMasterWallet();
+        for(Wallet childWallet : masterWallet.getChildWallets()) {
+            if(!childWallet.isNested()) {
+                Storage storage = AppServices.get().getOpenWallets().get(childWallet);
+                if(!storage.isPersisted(childWallet)) {
+                    try {
+                        storage.saveWallet(childWallet);
+                    } catch(Exception e) {
+                        AppServices.showErrorDialog("Error saving wallet " + childWallet.getName(), e.getMessage());
+                    }
+                }
+            }
+        }
+
+        //The WhirlpoolWallet has already been configured for the tx0 preview
+        Whirlpool whirlpool = AppServices.getWhirlpoolServices().getWhirlpool(getWalletForm().getStorage().getWalletId(masterWallet));
+        Map<BlockTransactionHashIndex, WalletNode> utxos = walletTransactionProperty.get().getSelectedUtxos();
+        Whirlpool.Tx0BroadcastService tx0BroadcastService = new Whirlpool.Tx0BroadcastService(whirlpool, whirlpoolProperty.get(), utxos.keySet());
+        tx0BroadcastService.setOnRunning(workerStateEvent -> {
+            premixButton.setDisable(true);
+            addWalletTransactionNodes();
+        });
+        tx0BroadcastService.setOnSucceeded(workerStateEvent -> {
+            premixButton.setDisable(false);
+            Sha256Hash txid = tx0BroadcastService.getValue();
+            clear(null);
+        });
+        tx0BroadcastService.setOnFailed(workerStateEvent -> {
+            premixButton.setDisable(false);
+            Throwable exception = workerStateEvent.getSource().getException();
+            while(exception.getCause() != null) {
+                exception = exception.getCause();
+            }
+
+            AppServices.showErrorDialog("Error broadcasting premix transaction", exception.getMessage());
+        });
+        ServiceProgressDialog progressDialog = new ServiceProgressDialog("Whirlpool", "Broadcast Premix Transaction", "/image/whirlpool.png", tx0BroadcastService);
+        AppServices.moveToActiveWindowScreen(progressDialog);
+        tx0BroadcastService.start();
+    }
+
+    public void broadcastNotification(ActionEvent event) {
+        Wallet wallet = getWalletForm().getWallet();
+        Storage storage = AppServices.get().getOpenWallets().get(wallet);
+        if(wallet.isEncrypted()) {
+            WalletPasswordDialog dlg = new WalletPasswordDialog(wallet.getMasterName(), WalletPasswordDialog.PasswordRequirement.LOAD);
+            Optional<SecureString> password = dlg.showAndWait();
+            if(password.isPresent()) {
+                Storage.DecryptWalletService decryptWalletService = new Storage.DecryptWalletService(wallet.copy(), password.get());
+                decryptWalletService.setOnSucceeded(workerStateEvent -> {
+                    EventManager.get().post(new StorageEvent(storage.getWalletId(wallet), TimedEvent.Action.END, "Done"));
+                    Wallet decryptedWallet = decryptWalletService.getValue();
+                    broadcastNotification(decryptedWallet);
+                    decryptedWallet.clearPrivate();
+                });
+                decryptWalletService.setOnFailed(workerStateEvent -> {
+                    EventManager.get().post(new StorageEvent(storage.getWalletId(wallet), TimedEvent.Action.END, "Failed"));
+                    AppServices.showErrorDialog("Incorrect Password", decryptWalletService.getException().getMessage());
+                });
+                EventManager.get().post(new StorageEvent(storage.getWalletId(wallet), TimedEvent.Action.START, "Decrypting wallet..."));
+                decryptWalletService.start();
+            }
+        } else {
+            broadcastNotification(wallet);
+        }
+    }
+
+    public void broadcastNotification(Wallet decryptedWallet) {
+        try {
+            PaymentCode paymentCode = decryptedWallet.getPaymentCode();
+            PaymentCode externalPaymentCode = paymentCodeProperty.get();
+            WalletTransaction walletTransaction = walletTransactionProperty.get();
+            WalletNode input0Node = walletTransaction.getSelectedUtxos().entrySet().iterator().next().getValue();
+            Keystore keystore = input0Node.getWallet().isNested() ? decryptedWallet.getChildWallet(input0Node.getWallet().getName()).getKeystores().get(0) : decryptedWallet.getKeystores().get(0);
+            ECKey input0Key = keystore.getKey(input0Node);
+            TransactionOutPoint input0Outpoint = walletTransaction.getTransaction().getInputs().iterator().next().getOutpoint();
+            SecretPoint secretPoint = new SecretPoint(input0Key.getPrivKeyBytes(), externalPaymentCode.getNotificationKey().getPubKey());
+            byte[] blindingMask = PaymentCode.getMask(secretPoint.ECDHSecretAsBytes(), input0Outpoint.bitcoinSerialize());
+            byte[] blindedPaymentCode = PaymentCode.blind(paymentCode.getPayload(), blindingMask);
+
+            List<UtxoSelector> utxoSelectors = List.of(new PresetUtxoSelector(walletTransaction.getSelectedUtxos().keySet(), true));
+            Long userFee = userFeeSet.get() ? getFeeValueSats() : null;
+            double feeRate = getUserFeeRate();
+            Integer currentBlockHeight = AppServices.getCurrentBlockHeight();
+            boolean groupByAddress = Config.get().isGroupByAddress();
+            boolean includeMempoolOutputs = Config.get().isIncludeMempoolOutputs();
+            boolean includeSpentMempoolOutputs = includeSpentMempoolOutputsProperty.get();
+
+            WalletTransaction finalWalletTx = decryptedWallet.createWalletTransaction(utxoSelectors, getUtxoFilters(), walletTransaction.getPayments(), List.of(blindedPaymentCode), excludedChangeNodes, feeRate, getMinimumFeeRate(), userFee, currentBlockHeight, groupByAddress, includeMempoolOutputs, includeSpentMempoolOutputs);
+            PSBT psbt = finalWalletTx.createPSBT();
+            decryptedWallet.sign(psbt);
+            decryptedWallet.finalise(psbt);
+            Transaction transaction = psbt.extractTransaction();
+
+            ServiceProgressDialog.ProxyWorker proxyWorker = new ServiceProgressDialog.ProxyWorker();
+            ElectrumServer.BroadcastTransactionService broadcastTransactionService = new ElectrumServer.BroadcastTransactionService(transaction);
+            broadcastTransactionService.setOnSucceeded(successEvent -> {
+                ElectrumServer.TransactionMempoolService transactionMempoolService = new ElectrumServer.TransactionMempoolService(walletTransaction.getWallet(), transaction.getTxId(), new HashSet<>(walletTransaction.getSelectedUtxos().values()));
+                transactionMempoolService.setDelay(Duration.seconds(2));
+                transactionMempoolService.setPeriod(Duration.seconds(5));
+                transactionMempoolService.setRestartOnFailure(false);
+                transactionMempoolService.setOnSucceeded(mempoolWorkerStateEvent -> {
+                    Set<String> scriptHashes = transactionMempoolService.getValue();
+                    if(!scriptHashes.isEmpty()) {
+                        transactionMempoolService.cancel();
+                        clear(null);
+                        if(Config.get().isUsePayNym()) {
+                            proxyWorker.setMessage("Finding PayNym...");
+                            AppServices.getPayNymService().getPayNym(externalPaymentCode.toString()).subscribe(payNym -> {
+                                proxyWorker.end();
+                                addChildWallets(walletTransaction.getWallet(), externalPaymentCode, transaction, payNym);
+                            }, error -> {
+                                proxyWorker.end();
+                                addChildWallets(walletTransaction.getWallet(), externalPaymentCode, transaction, null);
+                            });
+                        } else {
+                            proxyWorker.end();
+                            addChildWallets(walletTransaction.getWallet(), externalPaymentCode, transaction, null);
+                        }
+                    }
+
+                    if(transactionMempoolService.getIterationCount() > 5 && transactionMempoolService.isRunning()) {
+                        transactionMempoolService.cancel();
+                        proxyWorker.end();
+                        log.error("Timeout searching for broadcasted notification transaction");
+                        AppServices.showErrorDialog("Timeout searching for broadcasted transaction", "The transaction was broadcast but the server did not register it in the mempool. It is safe to try broadcasting again.");
+                    }
+                });
+                transactionMempoolService.setOnFailed(mempoolWorkerStateEvent -> {
+                    transactionMempoolService.cancel();
+                    proxyWorker.end();
+                    log.error("Error searching for broadcasted notification transaction", mempoolWorkerStateEvent.getSource().getException());
+                    AppServices.showErrorDialog("Timeout searching for broadcasted transaction", "The transaction was broadcast but the server did not register it in the mempool. It is safe to try broadcasting again.");
+                });
+                proxyWorker.setMessage("Receiving notification transaction...");
+                transactionMempoolService.start();
+            });
+            broadcastTransactionService.setOnFailed(failedEvent -> {
+                proxyWorker.end();
+                log.error("Error broadcasting notification transaction", failedEvent.getSource().getException());
+                AppServices.showErrorDialog("Error broadcasting notification transaction", failedEvent.getSource().getException().getMessage());
+            });
+            ServiceProgressDialog progressDialog = new ServiceProgressDialog("Broadcast", "Broadcast Notification Transaction", "/image/paynym.png", proxyWorker);
+            AppServices.moveToActiveWindowScreen(progressDialog);
+            proxyWorker.setMessage("Broadcasting notification transaction...");
+            proxyWorker.start();
+            broadcastTransactionService.start();
+        } catch(Exception e) {
+            log.error("Error creating notification transaction", e);
+            AppServices.showErrorDialog("Error creating notification transaction", e.getMessage());
+        }
+    }
+
+    private void addChildWallets(Wallet wallet, PaymentCode externalPaymentCode, Transaction transaction, PayNym payNym) {
+        List<Wallet> addedWallets = addChildWallets(externalPaymentCode, payNym);
+        Wallet masterWallet = getWalletForm().getMasterWallet();
+        Storage storage = AppServices.get().getOpenWallets().get(masterWallet);
+        EventManager.get().post(new ChildWalletsAddedEvent(storage, masterWallet, addedWallets));
+
+        BlockTransaction blockTransaction = wallet.getWalletTransaction(transaction.getTxId());
+        if(blockTransaction != null && blockTransaction.getLabel() == null) {
+            blockTransaction.setLabel("Link " + (payNym == null ? externalPaymentCode.toAbbreviatedString() : payNym.nymName()));
+            TransactionEntry transactionEntry = new TransactionEntry(wallet, blockTransaction, Collections.emptyMap(), Collections.emptyMap());
+            EventManager.get().post(new WalletEntryLabelsChangedEvent(wallet, List.of(transactionEntry)));
+        }
+
+        if(paymentTabs.getTabs().size() > 0 && !addedWallets.isEmpty()) {
+            Wallet addedWallet = addedWallets.stream().filter(w -> w.getScriptType() == ScriptType.P2WPKH).findFirst().orElse(addedWallets.iterator().next());
+            PaymentController controller = (PaymentController)paymentTabs.getTabs().get(0).getUserData();
+            controller.setPayNym(payNym == null ? PayNym.fromWallet(addedWallet) : payNym);
+        }
+
+        Glyph successGlyph = new Glyph(FontAwesome5.FONT_NAME, FontAwesome5.Glyph.CHECK_CIRCLE);
+        successGlyph.getStyleClass().add("success");
+        successGlyph.setFontSize(50);
+
+        AppServices.showAlertDialog("Notification Successful", "The notification transaction was successfully sent for payment code " +
+                externalPaymentCode.toAbbreviatedString() + (payNym == null ? "" : " (" + payNym.nymName() + ")") +
+                ".\n\nYou can send to it by entering the payment code, or selecting `PayNym or Payment code` in the Pay to dropdown.", Alert.AlertType.INFORMATION, successGlyph, ButtonType.OK);
+    }
+
+    public List<Wallet> addChildWallets(PaymentCode externalPaymentCode, PayNym payNym) {
+        List<Wallet> addedWallets = new ArrayList<>();
+        Wallet masterWallet = getWalletForm().getMasterWallet();
+        Storage storage = AppServices.get().getOpenWallets().get(masterWallet);
+        List<ScriptType> scriptTypes = PayNym.getSegwitScriptTypes();
+        for(ScriptType childScriptType : scriptTypes) {
+            String label = (payNym == null ? externalPaymentCode.toAbbreviatedString() : payNym.nymName()) + " " + childScriptType.getName();
+            Wallet addedWallet = masterWallet.addChildWallet(externalPaymentCode, childScriptType, label);
+            if(!storage.isPersisted(addedWallet)) {
+                try {
+                    storage.saveWallet(addedWallet);
+                } catch(Exception e) {
+                    log.error("Error saving wallet", e);
+                    AppServices.showErrorDialog("Error saving wallet " + addedWallet.getName(), e.getMessage());
+                }
+            }
+            addedWallets.add(addedWallet);
+        }
+
+        return addedWallets;
+    }
+
+    private void setInputFieldsDisabled(boolean disablePayments, boolean disableFeeSelection) {
+        for(int i = 0; i < paymentTabs.getTabs().size(); i++) {
+            Tab tab = paymentTabs.getTabs().get(i);
+            tab.setClosable(!disablePayments);
+            PaymentController controller = (PaymentController)tab.getUserData();
+            controller.setInputFieldsDisabled(disablePayments);
+        }
+
+        feeRange.setDisable(disableFeeSelection);
+        targetBlocks.setDisable(disableFeeSelection);
+        fee.setDisable(disableFeeSelection);
+        feeAmountUnit.setDisable(disableFeeSelection);
+
+        transactionDiagram.requestFocus();
     }
 
     @Subscribe
@@ -762,8 +1417,8 @@ public class SendController extends WalletFormController implements Initializabl
 
     @Subscribe
     public void walletHistoryChanged(WalletHistoryChangedEvent event) {
-        if(event.getWallet().equals(walletForm.getWallet()) && createdWalletTransactionProperty.get() != null) {
-            if(createdWalletTransactionProperty.get().getSelectedUtxos() != null && allSelectedUtxosSpent(event.getHistoryChangedNodes())) {
+        if(event.fromThisOrNested(walletForm.getWallet()) && walletForm.getCreatedWalletTransaction() != null) {
+            if(walletForm.getCreatedWalletTransaction().getSelectedUtxos() != null && allSelectedUtxosSpent(event.getAllHistoryChangedNodes())) {
                 clear(null);
             } else {
                 updateTransaction();
@@ -772,9 +1427,9 @@ public class SendController extends WalletFormController implements Initializabl
     }
 
     private boolean allSelectedUtxosSpent(List<WalletNode> historyChangedNodes) {
-        Set<BlockTransactionHashIndex> unspentUtxos = new HashSet<>(createdWalletTransactionProperty.get().getSelectedUtxos().keySet());
+        Set<BlockTransactionHashIndex> unspentUtxos = new HashSet<>(walletForm.getCreatedWalletTransaction().getSelectedUtxos().keySet());
 
-        for(Map.Entry<BlockTransactionHashIndex, WalletNode> selectedUtxoEntry : createdWalletTransactionProperty.get().getSelectedUtxos().entrySet()) {
+        for(Map.Entry<BlockTransactionHashIndex, WalletNode> selectedUtxoEntry : walletForm.getCreatedWalletTransaction().getSelectedUtxos().entrySet()) {
             BlockTransactionHashIndex utxo = selectedUtxoEntry.getKey();
             WalletNode utxoWalletNode = selectedUtxoEntry.getValue();
 
@@ -792,8 +1447,8 @@ public class SendController extends WalletFormController implements Initializabl
     }
 
     @Subscribe
-    public void walletEntryLabelChanged(WalletEntryLabelChangedEvent event) {
-        if(event.getWallet().equals(walletForm.getWallet())) {
+    public void walletEntryLabelChanged(WalletEntryLabelsChangedEvent event) {
+        if(event.fromThisOrNested(walletForm.getWallet())) {
             updateTransaction();
         }
     }
@@ -805,20 +1460,36 @@ public class SendController extends WalletFormController implements Initializabl
         mempoolSizeFeeRatesChart.update(getMempoolHistogram());
         if(targetBlocksField.isVisible()) {
             setFeeRate(event.getTargetBlockFeeRates().get(getTargetBlocks()));
+        } else {
+            setFeeRatePriority(getFeeRangeRate());
         }
+        addFeeRangeTrackHighlight(0);
     }
 
     @Subscribe
     public void feeRateSelectionChanged(FeeRatesSelectionChangedEvent event) {
-        updateFeeRateSelection(event.getFeeRateSelection());
+        if(event.getWallet() == getWalletForm().getWallet()) {
+            updateFeeRateSelection(event.getFeeRateSelection());
+        }
     }
 
     @Subscribe
     public void spendUtxos(SpendUtxoEvent event) {
-        if(!event.getUtxos().isEmpty() && event.getWallet().equals(getWalletForm().getWallet())) {
+        if((event.getUtxos() == null || !event.getUtxos().isEmpty()) && event.getWallet().equals(getWalletForm().getWallet())) {
+            if(whirlpoolProperty.get() != null || paymentCodeProperty.get() != null) {
+                clear(null);
+            }
+
             if(event.getPayments() != null) {
                 clear(null);
                 setPayments(event.getPayments());
+            } else if(paymentTabs.getTabs().size() == 1 && event.getUtxos() != null) {
+                Payment payment = new Payment(null, null, event.getUtxos().stream().mapToLong(BlockTransactionHashIndex::getValue).sum(), true);
+                setPayments(List.of(payment));
+            }
+
+            if(event.getOpReturns() != null) {
+                opReturnsList.addAll(event.getOpReturns());
             }
 
             if(event.getFee() != null) {
@@ -826,12 +1497,40 @@ public class SendController extends WalletFormController implements Initializabl
                 userFeeSet.set(true);
             }
 
-            includeMempoolInputsProperty.set(event.isIncludeMempoolInputs());
+            includeSpentMempoolOutputsProperty.set(event.isIncludeSpentMempoolOutputs());
 
-            List<BlockTransactionHashIndex> utxos = event.getUtxos();
-            utxoSelectorProperty.set(new PresetUtxoSelector(utxos));
+            if(event.getUtxos() != null) {
+                List<BlockTransactionHashIndex> utxos = event.getUtxos();
+                utxoSelectorProperty.set(new PresetUtxoSelector(utxos));
+            }
+
             utxoFilterProperty.set(null);
-            updateTransaction(event.getPayments() == null);
+            whirlpoolProperty.set(event.getPool());
+            paymentCodeProperty.set(event.getPaymentCode());
+            updateTransaction(event.getPayments() == null || event.getPayments().stream().anyMatch(Payment::isSendMax));
+
+            boolean isWhirlpoolPremix = (event.getPool() != null);
+            premixButton.setVisible(isWhirlpoolPremix);
+            premixButton.setDefaultButton(isWhirlpoolPremix);
+
+            boolean isNotificationTransaction = (event.getPaymentCode() != null);
+            notificationButton.setVisible(isNotificationTransaction);
+            notificationButton.setDefaultButton(isNotificationTransaction);
+
+            setInputFieldsDisabled(isWhirlpoolPremix || isNotificationTransaction, isWhirlpoolPremix);
+        }
+    }
+
+    @Subscribe
+    public void sendPayments(SendPaymentsEvent event) {
+        if(event.getWallet().equals(getWalletForm().getWallet())) {
+            if(event.getPayments() != null) {
+                clear(null);
+                Platform.runLater(() -> {
+                    setPayments(event.getPayments());
+                    updateTransaction(event.getPayments() == null || event.getPayments().stream().anyMatch(Payment::isSendMax));
+                });
+            }
         }
     }
 
@@ -839,6 +1538,19 @@ public class SendController extends WalletFormController implements Initializabl
     public void bitcoinUnitChanged(BitcoinUnitChangedEvent event) {
         BitcoinUnit unit = getBitcoinUnit(event.getBitcoinUnit());
         feeAmountUnit.getSelectionModel().select(BitcoinUnit.BTC.equals(unit) ? 0 : 1);
+    }
+
+    @Subscribe
+    public void unitFormatChanged(UnitFormatChangedEvent event) {
+        if(fee.getTextFormatter() instanceof CoinTextFormatter coinTextFormatter && coinTextFormatter.getUnitFormat() != event.getUnitFormat()) {
+            Long value = getFeeValueSats(coinTextFormatter.getUnitFormat(), event.getBitcoinUnit());
+            fee.setTextFormatter(new CoinTextFormatter(event.getUnitFormat()));
+
+            if(value != null) {
+                setFeeValueSats(value);
+            }
+        }
+        fiatFeeAmount.refresh(event.getUnitFormat());
     }
 
     @Subscribe
@@ -888,19 +1600,173 @@ public class SendController extends WalletFormController implements Initializabl
     }
 
     @Subscribe
+    public void replaceChangeAddress(ReplaceChangeAddressEvent event) {
+        if(event.getWalletTransaction() == walletTransactionProperty.get()) {
+            excludedChangeNodes.addAll(event.getWalletTransaction().getChangeMap().keySet());
+            updateTransaction();
+        }
+    }
+
+    @Subscribe
     public void walletUtxoStatusChanged(WalletUtxoStatusChangedEvent event) {
-        if(event.getWallet().equals(getWalletForm().getWallet())) {
+        if(event.fromThisOrNested(getWalletForm().getWallet())) {
             UtxoSelector utxoSelector = utxoSelectorProperty.get();
             if(utxoSelector instanceof MaxUtxoSelector) {
                 updateTransaction(true);
             } else if(utxoSelectorProperty().get() instanceof PresetUtxoSelector) {
                 PresetUtxoSelector presetUtxoSelector = new PresetUtxoSelector(((PresetUtxoSelector)utxoSelector).getPresetUtxos());
-                presetUtxoSelector.getPresetUtxos().remove(event.getUtxo());
+                presetUtxoSelector.getPresetUtxos().removeAll(event.getUtxos());
                 utxoSelectorProperty.set(presetUtxoSelector);
                 updateTransaction(true);
             } else {
                 updateTransaction();
             }
+        }
+    }
+
+    @Subscribe
+    public void includeMempoolOutputsChangedEvent(IncludeMempoolOutputsChangedEvent event) {
+        updateTransaction();
+    }
+
+    @Subscribe
+    public void newBlock(NewBlockEvent event) {
+        if(cpfpFeeRate.isVisible()) {
+            updateTransaction();
+        }
+    }
+
+    @Subscribe
+    public void sorobanInitiated(SorobanInitiatedEvent event) {
+        if(event.getWallet().equals(getWalletForm().getWallet())) {
+            if(!AppServices.onlineProperty().get()) {
+                Optional<ButtonType> optButtonType = AppServices.showErrorDialog("Cannot Mix Offline", "Sparrow needs to be connected to a server to perform collaborative mixes. Try to connect?", ButtonType.CANCEL, ButtonType.OK);
+                if(optButtonType.isPresent() && optButtonType.get() == ButtonType.OK) {
+                    AppServices.onlineProperty().set(true);
+                }
+                return;
+            }
+
+            Platform.runLater(() -> {
+                InitiatorDialog initiatorDialog = new InitiatorDialog(getWalletForm().getWalletId(), getWalletForm().getWallet(), walletTransactionProperty.get());
+                if(Config.get().isSameAppMixing()) {
+                    initiatorDialog.initModality(Modality.NONE);
+                }
+                Optional<Transaction> optTransaction = initiatorDialog.showAndWait();
+                if(optTransaction.isPresent()) {
+                    BlockTransaction blockTransaction = walletForm.getWallet().getWalletTransaction(optTransaction.get().getTxId());
+                    if(blockTransaction != null && blockTransaction.getLabel() == null && walletTransactionProperty.get() != null) {
+                        blockTransaction.setLabel(walletTransactionProperty.get().getPayments().stream().map(Payment::getLabel).findFirst().orElse(null));
+                        TransactionEntry transactionEntry = new TransactionEntry(walletForm.getWallet(), blockTransaction, Collections.emptyMap(), Collections.emptyMap());
+                        EventManager.get().post(new WalletEntryLabelsChangedEvent(walletForm.getWallet(), List.of(transactionEntry)));
+                    }
+                    clear(null);
+                }
+            });
+        }
+    }
+
+    private class PrivacyAnalysisTooltip extends VBox {
+        private final List<Label> analysisLabels = new ArrayList<>();
+
+        public PrivacyAnalysisTooltip(WalletTransaction walletTransaction) {
+            List<Payment> payments = walletTransaction.getPayments();
+            List<Payment> userPayments = payments.stream().filter(payment -> payment.getType() != Payment.Type.FAKE_MIX).collect(Collectors.toList());
+            Map<Address, WalletNode> walletAddresses = walletTransaction.getAddressNodeMap();
+            OptimizationStrategy optimizationStrategy = getPreferredOptimizationStrategy();
+            boolean payNymPresent = isPayNymMixOnlyPayment(payments);
+            boolean fakeMixPresent = payments.stream().anyMatch(payment -> payment.getType() == Payment.Type.FAKE_MIX);
+            boolean roundPaymentAmounts = userPayments.stream().anyMatch(payment -> payment.getAmount() % 100 == 0);
+            boolean mixedAddressTypes = userPayments.stream().anyMatch(payment -> payment.getAddress().getScriptType() != getWalletForm().getWallet().getFreshNode(KeyPurpose.RECEIVE).getAddress().getScriptType());
+            boolean addressReuse = userPayments.stream().anyMatch(payment -> walletAddresses.get(payment.getAddress()) != null && !walletAddresses.get(payment.getAddress()).getTransactionOutputs().isEmpty());
+            boolean payjoinPresent = userPayments.stream().anyMatch(payment -> AppServices.getPayjoinURI(payment.getAddress()) != null);
+
+            if(optimizationStrategy == OptimizationStrategy.PRIVACY) {
+                if(payNymPresent) {
+                    addLabel("Appears as a normal transaction, but actual value transferred is hidden", getPlusGlyph());
+                } else if(fakeMixPresent) {
+                    addLabel("Appears as a two person coinjoin", getPlusGlyph());
+                } else {
+                    if(mixedAddressTypes) {
+                        addLabel("Cannot coinjoin due to mixed address types", getInfoGlyph());
+                    } else if(userPayments.size() > 1) {
+                        addLabel("Cannot coinjoin due to multiple payments", getInfoGlyph());
+                    } else if(payjoinPresent) {
+                        addLabel("Cannot coinjoin due to payjoin", getInfoGlyph());
+                    } else {
+                        if(utxoSelectorProperty().get() != null) {
+                            addLabel("Cannot fake coinjoin due to coin control", getInfoGlyph());
+                        } else {
+                            addLabel("Cannot fake coinjoin due to insufficient funds", getInfoGlyph());
+                        }
+
+                        if(!SorobanServices.canWalletMix(getWalletForm().getWallet())) {
+                            addLabel("Can only add mix partner to Native Segwit software wallets", getInfoGlyph());
+                        } else {
+                            addLabel("Add a mix partner to create a two person coinjoin", getInfoGlyph());
+                        }
+                    }
+                }
+            }
+
+            if(mixedAddressTypes) {
+                addLabel("Address types different to the wallet indicate external payments", getMinusGlyph());
+            }
+
+            if(roundPaymentAmounts && !fakeMixPresent && !payNymPresent) {
+                addLabel("Rounded payment amounts indicate external payments", getMinusGlyph());
+            }
+
+            if(addressReuse) {
+                addLabel("Address reuse detected", getMinusGlyph());
+            }
+
+            if(!fakeMixPresent && !mixedAddressTypes && !roundPaymentAmounts) {
+                addLabel("Appears as a possible self transfer", getPlusGlyph());
+            }
+
+            analysisLabels.sort(Comparator.comparingInt(o -> (Integer)o.getGraphic().getUserData()));
+            getChildren().addAll(analysisLabels);
+            setSpacing(5);
+        }
+
+        private void addLabel(String text, Node graphic) {
+            Label label = new Label(text);
+            label.setStyle("-fx-font-size: 11px");
+            label.setGraphic(graphic);
+            analysisLabels.add(label);
+        }
+
+        private static Glyph getPlusGlyph() {
+            Glyph plusGlyph = new Glyph(FontAwesome5.FONT_NAME, FontAwesome5.Glyph.PLUS_CIRCLE);
+            plusGlyph.setUserData(0);
+            plusGlyph.setStyle("-fx-text-fill: rgb(80, 161, 79)");
+            plusGlyph.setFontSize(12);
+            return plusGlyph;
+        }
+
+        private static Glyph getWarningGlyph() {
+            Glyph warningGlyph = new Glyph(FontAwesome5.FONT_NAME, FontAwesome5.Glyph.EXCLAMATION_TRIANGLE);
+            warningGlyph.setUserData(1);
+            warningGlyph.setStyle("-fx-text-fill: rgb(238, 210, 2)");
+            warningGlyph.setFontSize(12);
+            return warningGlyph;
+        }
+
+        private static Glyph getMinusGlyph() {
+            Glyph minusGlyph = new Glyph(FontAwesome5.FONT_NAME, FontAwesome5.Glyph.MINUS_CIRCLE);
+            minusGlyph.setUserData(2);
+            minusGlyph.setStyle("-fx-text-fill: #e06c75");
+            minusGlyph.setFontSize(12);
+            return minusGlyph;
+        }
+
+        private static Glyph getInfoGlyph() {
+            Glyph infoGlyph = new Glyph(FontAwesome5.FONT_NAME, FontAwesome5.Glyph.INFO_CIRCLE);
+            infoGlyph.setUserData(3);
+            infoGlyph.setStyle("-fx-text-fill: -fx-accent");
+            infoGlyph.setFontSize(12);
+            return infoGlyph;
         }
     }
 }

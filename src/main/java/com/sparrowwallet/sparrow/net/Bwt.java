@@ -1,12 +1,16 @@
 package com.sparrowwallet.sparrow.net;
 
+import com.google.common.net.HostAndPort;
 import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
 import com.sparrowwallet.drongo.KeyPurpose;
 import com.sparrowwallet.drongo.Network;
 import com.sparrowwallet.drongo.OutputDescriptor;
+import com.sparrowwallet.drongo.protocol.ScriptType;
 import com.sparrowwallet.drongo.wallet.BlockTransactionHash;
 import com.sparrowwallet.drongo.wallet.Wallet;
+import com.sparrowwallet.drongo.wallet.WalletNode;
+import com.sparrowwallet.sparrow.AppServices;
 import com.sparrowwallet.sparrow.EventManager;
 import com.sparrowwallet.sparrow.event.*;
 import com.sparrowwallet.sparrow.io.Config;
@@ -19,6 +23,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.net.InetAddress;
 import java.time.Duration;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -27,6 +32,7 @@ public class Bwt {
     private static final Logger log = LoggerFactory.getLogger(Bwt.class);
 
     public static final String DEFAULT_CORE_WALLET = "sparrow-grs";
+    public static final String ELECTRUM_PORT = "0";
     private static final int IMPORT_BATCH_SIZE = 350;
     private static boolean initialized;
     private Long shutdownPtr;
@@ -37,10 +43,15 @@ public class Bwt {
         if(!initialized) {
             try {
                 org.controlsfx.tools.Platform platform = org.controlsfx.tools.Platform.getCurrent();
-                if(platform == org.controlsfx.tools.Platform.OSX) {
+                String osArch = System.getProperty("os.arch");
+                if(platform == org.controlsfx.tools.Platform.OSX && osArch.equals("aarch64")) {
+                    NativeUtils.loadLibraryFromJar("/native/osx/aarch64/libbwt_jni.dylib");
+                } else if(platform == org.controlsfx.tools.Platform.OSX) {
                     NativeUtils.loadLibraryFromJar("/native/osx/x64/libbwt_jni.dylib");
                 } else if(platform == org.controlsfx.tools.Platform.WINDOWS) {
                     NativeUtils.loadLibraryFromJar("/native/windows/x64/bwt_jni.dll");
+                } else if(osArch.equals("aarch64")) {
+                    NativeUtils.loadLibraryFromJar("/native/linux/aarch64/libbwt_jni.so");
                 } else {
                     NativeUtils.loadLibraryFromJar("/native/linux/x64/libbwt_jni.so");
                 }
@@ -52,18 +63,35 @@ public class Bwt {
     }
 
     private void start(CallbackNotifier callback) {
-        start(Collections.emptyList(), null, null, null, callback);
+        start(Collections.emptyList(), Collections.emptyList(), null, null, null, callback);
     }
 
     private void start(Collection<Wallet> wallets, CallbackNotifier callback) {
         List<Wallet> validWallets = wallets.stream().filter(Wallet::isValid).collect(Collectors.toList());
 
-        List<String> outputDescriptors = new ArrayList<>();
+        Set<String> outputDescriptors = new LinkedHashSet<>();
+        Set<String> addresses = new LinkedHashSet<>();
         for(Wallet wallet : validWallets) {
             OutputDescriptor receiveOutputDescriptor = OutputDescriptor.getOutputDescriptor(wallet, KeyPurpose.RECEIVE);
             outputDescriptors.add(receiveOutputDescriptor.toString(false, false));
             OutputDescriptor changeOutputDescriptor = OutputDescriptor.getOutputDescriptor(wallet, KeyPurpose.CHANGE);
             outputDescriptors.add(changeOutputDescriptor.toString(false, false));
+
+            if(wallet.isMasterWallet() && wallet.hasPaymentCode()) {
+                Wallet notificationWallet = wallet.getNotificationWallet();
+                WalletNode notificationNode = notificationWallet.getNode(KeyPurpose.NOTIFICATION);
+                addresses.add(notificationNode.getAddress().toString());
+
+                for(Wallet childWallet : wallet.getChildWallets()) {
+                    if(childWallet.isNested()) {
+                        for(KeyPurpose keyPurpose : KeyPurpose.DEFAULT_PURPOSES) {
+                            for(WalletNode addressNode : childWallet.getNode(keyPurpose).getChildren()) {
+                                addresses.add(addressNode.getAddress().toString());
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         int rescanSince = validWallets.stream().filter(wallet -> wallet.getBirthDate() != null).mapToInt(wallet -> (int)(wallet.getBirthDate().getTime() / 1000)).min().orElse(-1);
@@ -77,7 +105,7 @@ public class Bwt {
             }
         }
 
-        start(outputDescriptors, rescanSince, forceRescan, gapLimit, callback);
+        start(outputDescriptors, addresses, rescanSince, forceRescan, gapLimit, callback);
     }
 
     /**
@@ -89,7 +117,7 @@ public class Bwt {
      * @param gapLimit desired gap limit beyond last used address
      * @param callback object receiving notifications
      */
-    private void start(List<String> outputDescriptors, Integer rescanSince, Boolean forceRescan, Integer gapLimit, CallbackNotifier callback) {
+    private void start(Collection<String> outputDescriptors, Collection<String> addresses, Integer rescanSince, Boolean forceRescan, Integer gapLimit, CallbackNotifier callback) {
         BwtConfig bwtConfig = new BwtConfig();
         bwtConfig.network = Network.get() == Network.MAINNET ? "groestlcoin" : Network.get().getName();
 
@@ -98,8 +126,13 @@ public class Bwt {
             bwtConfig.rescanSince = (rescanSince == null || rescanSince < 0 ? "now" : rescanSince);
             bwtConfig.forceRescan = forceRescan;
             bwtConfig.gapLimit = gapLimit;
+
+            if(!addresses.isEmpty()) {
+                bwtConfig.addresses = addresses;
+            }
         } else {
             bwtConfig.requireAddresses = false;
+            bwtConfig.bitcoindTimeout = 30;
         }
 
         bwtConfig.verbose = log.isDebugEnabled() ? 2 : 0;
@@ -107,19 +140,36 @@ public class Bwt {
             bwtConfig.setupLogger = false;
         }
 
-        bwtConfig.electrumAddr = "127.0.0.1:0";
+        bwtConfig.electrumAddr = ElectrumServer.CORE_ELECTRUM_HOST + ":" + ELECTRUM_PORT;
         bwtConfig.electrumSkipMerkle = true;
 
         Config config = Config.get();
-        bwtConfig.bitcoindUrl = config.getCoreServer();
-        if(config.getCoreAuthType() == CoreAuthType.COOKIE && config.getCoreDataDir() != null) {
+        if(config.getCoreServer() != null) {
+            bwtConfig.bitcoindUrl = config.getCoreServer().getUrl();
+            try {
+                Protocol protocol = config.getCoreServer().getProtocol();
+                HostAndPort hostAndPort = protocol.getServerHostAndPort(bwtConfig.bitcoindUrl);
+                if(hostAndPort.getHost().endsWith(".local")) {
+                    InetAddress inetAddress = InetAddress.getByName(hostAndPort.getHost());
+                    bwtConfig.bitcoindUrl = protocol.toUrlString(inetAddress.getHostAddress(), hostAndPort.getPort());
+                }
+            } catch(Exception e) {
+                //ignore
+            }
+        }
+
+        HostAndPort torProxy = getTorProxy();
+        if(Protocol.isOnionAddress(bwtConfig.bitcoindUrl) && torProxy != null) {
+            bwtConfig.bitcoindProxy = torProxy.toString();
+        }
+
+        if((config.getCoreAuthType() == CoreAuthType.COOKIE || config.getCoreAuth() == null || config.getCoreAuth().length() < 2) && config.getCoreDataDir() != null) {
             bwtConfig.bitcoindDir = config.getCoreDataDir().getAbsolutePath() + "/";
         } else {
             bwtConfig.bitcoindAuth = config.getCoreAuth();
         }
-        if(config.getCoreMultiWallet() != Boolean.FALSE) {
-            bwtConfig.bitcoindWallet = config.getCoreWallet();
-        }
+
+        bwtConfig.bitcoindWallet = DEFAULT_CORE_WALLET;
         bwtConfig.createWalletIfMissing = true;
 
         Gson gson = new Gson();
@@ -127,6 +177,12 @@ public class Bwt {
         log.debug("Configuring bwt: " + jsonConfig);
 
         NativeBwtDaemon.start(jsonConfig, callback);
+    }
+
+    private HostAndPort getTorProxy() {
+        return AppServices.isTorRunning() ?
+                HostAndPort.fromParts("127.0.0.1", TorService.PROXY_PORT) :
+                (Config.get().getProxyServer() == null || Config.get().getProxyServer().isEmpty() || !Config.get().isUseProxy() ? null : HostAndPort.fromString(Config.get().getProxyServer().replace("localhost", "127.0.0.1")));
     }
 
     /**
@@ -143,7 +199,6 @@ public class Bwt {
         this.terminating = false;
         this.ready = false;
         this.shutdownPtr = null;
-        Platform.runLater(() -> EventManager.get().post(new BwtShutdownEvent()));
     }
 
     public boolean isRunning() {
@@ -158,8 +213,8 @@ public class Bwt {
         return terminating;
     }
 
-    public ConnectionService getConnectionService(Collection<Wallet> wallets) {
-        return wallets != null ? new ConnectionService(wallets) : new ConnectionService();
+    public ConnectionService getConnectionService(boolean useWallets) {
+        return new ConnectionService(useWallets);
     }
 
     public DisconnectionService getDisconnectionService() {
@@ -185,11 +240,20 @@ public class Bwt {
         @SerializedName("bitcoind_wallet")
         public String bitcoindWallet;
 
+        @SerializedName("bitcoind_proxy")
+        public String bitcoindProxy;
+
+        @SerializedName("bitcoind_timeout")
+        public Integer bitcoindTimeout;
+
         @SerializedName("create_wallet_if_missing")
         public Boolean createWalletIfMissing;
 
         @SerializedName("descriptors")
-        public List<String> descriptors;
+        public Collection<String> descriptors;
+
+        @SerializedName("addresses")
+        public Collection<String> addresses;
 
         @SerializedName("xpubs")
         public String xpubs;
@@ -226,14 +290,10 @@ public class Bwt {
     }
 
     public final class ConnectionService extends Service<Void> {
-        private final Collection<Wallet> wallets;
+        private final boolean useWallets;
 
-        public ConnectionService() {
-            this.wallets = null;
-        }
-
-        public ConnectionService(Collection<Wallet> wallets) {
-            this.wallets = wallets;
+        public ConnectionService(boolean useWallets) {
+            this.useWallets = useWallets;
         }
 
         @Override
@@ -250,7 +310,7 @@ public class Bwt {
                                 Bwt.this.shutdown();
                                 terminating = false;
                             } else {
-                                Platform.runLater(() -> EventManager.get().post(new BwtBootStatusEvent("Connecting to Groestlcoin Core node at " + Config.get().getCoreServer() + "...")));
+                                Platform.runLater(() -> EventManager.get().post(new BwtBootStatusEvent("Connecting to Bitcoin Core node " + Config.get().getServerDisplayName() + "...")));
                             }
                         }
 
@@ -284,7 +344,7 @@ public class Bwt {
 
                         @Override
                         public void onHttpReady(String addr) {
-                            log.info("http ready at " + addr);
+                            log.debug("http ready at " + addr);
                         }
 
                         @Override
@@ -297,10 +357,14 @@ public class Bwt {
                         }
                     };
 
-                    if(wallets == null) {
+                    if(!useWallets) {
                         Bwt.this.start(notifier);
                     } else {
-                        Bwt.this.start(wallets, notifier);
+                        if(AppServices.get().getOpenWallets().keySet().stream().anyMatch(wallet -> wallet.getScriptType() == ScriptType.P2TR)) {
+                            throw new IllegalStateException("Taproot wallets are not yet supported when connecting to Bitcoin Core");
+                        }
+
+                        Bwt.this.start(AppServices.get().getOpenWallets().keySet(), notifier);
                     }
 
                     return null;

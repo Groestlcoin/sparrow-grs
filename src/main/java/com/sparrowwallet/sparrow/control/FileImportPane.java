@@ -4,7 +4,9 @@ import com.google.gson.JsonParseException;
 import com.sparrowwallet.drongo.crypto.InvalidPasswordException;
 import com.sparrowwallet.drongo.protocol.ScriptType;
 import com.sparrowwallet.drongo.wallet.Keystore;
+import com.sparrowwallet.drongo.wallet.KeystoreSource;
 import com.sparrowwallet.drongo.wallet.Wallet;
+import com.sparrowwallet.sparrow.AppServices;
 import com.sparrowwallet.sparrow.glyphfont.FontAwesome5;
 import com.sparrowwallet.sparrow.io.FileImport;
 import com.sparrowwallet.sparrow.io.ImportException;
@@ -40,12 +42,14 @@ public abstract class FileImportPane extends TitledDescriptionPane {
     protected ButtonBase importButton;
     private final SimpleStringProperty password = new SimpleStringProperty("");
     private final boolean scannable;
+    private final boolean fileFormatAvailable;
     protected List<Wallet> wallets;
 
-    public FileImportPane(FileImport importer, String title, String description, String content, String imageUrl, boolean scannable) {
+    public FileImportPane(FileImport importer, String title, String description, String content, String imageUrl, boolean scannable, boolean fileFormatAvailable) {
         super(title, description, content, imageUrl);
         this.importer = importer;
         this.scannable = scannable;
+        this.fileFormatAvailable = fileFormatAvailable;
 
         buttonBox.getChildren().clear();
         buttonBox.getChildren().add(createButton());
@@ -53,7 +57,7 @@ public abstract class FileImportPane extends TitledDescriptionPane {
 
     @Override
     protected Control createButton() {
-        if(scannable) {
+        if(scannable && fileFormatAvailable) {
             ToggleButton scanButton = new ToggleButton("Scan...");
             Glyph cameraGlyph = new Glyph(FontAwesome5.FONT_NAME, FontAwesome5.Glyph.CAMERA);
             cameraGlyph.setFontSize(12);
@@ -74,6 +78,16 @@ public abstract class FileImportPane extends TitledDescriptionPane {
             SegmentedButton segmentedButton = new SegmentedButton();
             segmentedButton.getButtons().addAll(scanButton, fileButton);
             return segmentedButton;
+        } else if(scannable) {
+            importButton = new Button("Scan...");
+            Glyph cameraGlyph = new Glyph(FontAwesome5.FONT_NAME, FontAwesome5.Glyph.CAMERA);
+            cameraGlyph.setFontSize(12);
+            importButton.setGraphic(cameraGlyph);
+            importButton.setAlignment(Pos.CENTER_RIGHT);
+            importButton.setOnAction(event -> {
+                importQR();
+            });
+            return importButton;
         } else {
             importButton = new Button("Import File...");
             importButton.setAlignment(Pos.CENTER_RIGHT);
@@ -95,6 +109,7 @@ public abstract class FileImportPane extends TitledDescriptionPane {
                 new FileChooser.ExtensionFilter("TXT", "*.txt")
         );
 
+        AppServices.moveToActiveWindowScreen(window, 800, 450);
         File file = fileChooser.showOpenDialog(window);
         if(file != null) {
             importFile(file, null);
@@ -111,8 +126,9 @@ public abstract class FileImportPane extends TitledDescriptionPane {
                     importButton.setDisable(true);
                     setExpanded(true);
                 } else {
-                    InputStream inputStream = new BufferedInputStream(new FileInputStream(file));
-                    importFile(file.getName(), inputStream, password);
+                    try(InputStream inputStream = new BufferedInputStream(new FileInputStream(file))) {
+                        importFile(file.getName(), inputStream, password);
+                    };
                 }
             } catch (Exception e) {
                 log.error("Error importing file", e);
@@ -142,6 +158,15 @@ public abstract class FileImportPane extends TitledDescriptionPane {
                 try {
                     importFile(importer.getName(), null, null);
                 } catch(ImportException e) {
+                    log.error("Error importing QR", e);
+                    setError("Import Error", e.getMessage());
+                }
+            } else if(result.outputDescriptor != null) {
+                wallets = List.of(result.outputDescriptor.toKeystoreWallet(null));
+                try {
+                    importFile(importer.getName(), null, null);
+                } catch(ImportException e) {
+                    log.error("Error importing QR", e);
                     setError("Import Error", e.getMessage());
                 }
             } else if(result.payload != null) {
@@ -161,6 +186,9 @@ public abstract class FileImportPane extends TitledDescriptionPane {
             } else if(result.exception != null) {
                 log.error("Error importing QR", result.exception);
                 setError("Import Error", result.exception.getMessage());
+            } else {
+                setError("Import Error", null);
+                setExpanded(true);
             }
         }
     }
@@ -169,11 +197,15 @@ public abstract class FileImportPane extends TitledDescriptionPane {
         if(wallets != null) {
             for(Wallet wallet : wallets) {
                 if(scriptType.equals(wallet.getScriptType()) && !wallet.getKeystores().isEmpty()) {
-                    return wallet.getKeystores().get(0);
+                    Keystore keystore = wallet.getKeystores().get(0);
+                    keystore.setLabel(importer.getName().replace(" Multisig", ""));
+                    keystore.setSource(KeystoreSource.HW_AIRGAPPED);
+                    keystore.setWalletModel(importer.getWalletModel());
+                    return keystore;
                 }
             }
 
-            throw new ImportException("Script type " + scriptType + " is not supported");
+            throw new ImportException("Script type " + scriptType.getDescription() + " is not supported in this QR. Check you are displaying the correct QR code.");
         }
 
         return null;
@@ -182,7 +214,7 @@ public abstract class FileImportPane extends TitledDescriptionPane {
     protected abstract void importFile(String fileName, InputStream inputStream, String password) throws ImportException;
 
     private Node getPasswordEntry(File file) {
-        CustomPasswordField passwordField = (CustomPasswordField) TextFields.createClearablePasswordField();
+        CustomPasswordField passwordField = new ViewPasswordField();
         passwordField.setPromptText("Wallet password");
         password.bind(passwordField.textProperty());
         HBox.setHgrow(passwordField, Priority.ALWAYS);

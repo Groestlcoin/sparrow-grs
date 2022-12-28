@@ -11,6 +11,7 @@ import javafx.scene.control.*;
 import javafx.scene.layout.AnchorPane;
 import javafx.scene.layout.StackPane;
 
+import java.util.Comparator;
 import java.util.List;
 
 public class WalletExportDialog extends Dialog<Wallet> {
@@ -41,24 +42,29 @@ public class WalletExportDialog extends Dialog<Wallet> {
 
         List<WalletExport> exporters;
         if(wallet.getPolicyType() == PolicyType.SINGLE) {
-            exporters = List.of(new Electrum()/*, new SpecterDesktop()*/);
+            exporters = List.of(new Electrum(), new ElectrumPersonalServer()/*, new Descriptor(), new SpecterDesktop(), new Sparrow()*/);
         } else if(wallet.getPolicyType() == PolicyType.MULTI) {
-            exporters = List.of(/*new ColdcardMultisig(), new CoboVaultMultisig(), */new Electrum()/*, new SpecterDesktop()*/);
+            exporters = List.of(/*new CaravanMultisig(), new ColdcardMultisig(), new CoboVaultMultisig(),*/ new Electrum(), new ElectrumPersonalServer()/*, new KeystoneMultisig(), new Descriptor(), new PassportMultisig(), new SpecterDesktop(), new BlueWalletMultisig(), new SpecterDIY(), new Sparrow()*/);
         } else {
             throw new UnsupportedOperationException("Cannot export wallet with policy type " + wallet.getPolicyType());
         }
 
         Accordion exportAccordion = new Accordion();
-        for (WalletExport exporter : exporters) {
-            FileWalletExportPane exportPane = new FileWalletExportPane(wallet, exporter);
-            exportAccordion.getPanes().add(exportPane);
+        for(WalletExport exporter : exporters) {
+            if(!exporter.isDeprecated() || Config.get().isShowDeprecatedImportExport()) {
+                FileWalletExportPane exportPane = new FileWalletExportPane(wallet, exporter);
+                exportAccordion.getPanes().add(exportPane);
+            }
         }
+
+        exportAccordion.getPanes().sort(Comparator.comparing(o -> ((TitledDescriptionPane) o).getTitle()));
         scrollPane.setContent(exportAccordion);
 
         final ButtonType cancelButtonType = new javafx.scene.control.ButtonType("Cancel", ButtonBar.ButtonData.CANCEL_CLOSE);
         dialogPane.getButtonTypes().addAll(cancelButtonType);
         dialogPane.setPrefWidth(500);
         dialogPane.setPrefHeight(480);
+        AppServices.moveToActiveWindowScreen(this);
 
         setResultConverter(dialogButton -> dialogButton != cancelButtonType ? wallet : null);
     }

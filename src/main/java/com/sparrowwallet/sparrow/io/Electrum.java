@@ -10,10 +10,10 @@ import com.sparrowwallet.drongo.address.Address;
 import com.sparrowwallet.drongo.crypto.*;
 import com.sparrowwallet.drongo.policy.Policy;
 import com.sparrowwallet.drongo.policy.PolicyType;
-import com.sparrowwallet.drongo.protocol.ScriptType;
-import com.sparrowwallet.drongo.protocol.Sha256Hash;
-import com.sparrowwallet.drongo.protocol.Transaction;
+import com.sparrowwallet.drongo.protocol.*;
 import com.sparrowwallet.drongo.wallet.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.*;
 import java.lang.reflect.Type;
@@ -22,6 +22,8 @@ import java.util.*;
 import java.util.zip.InflaterInputStream;
 
 public class Electrum implements KeystoreFileImport, WalletImport, WalletExport {
+    private static final Logger log = LoggerFactory.getLogger(Electrum.class);
+
     @Override
     public String getName() {
         return "Electrum-GRS";
@@ -33,8 +35,8 @@ public class Electrum implements KeystoreFileImport, WalletImport, WalletExport 
     }
 
     @Override
-    public String getKeystoreImportDescription() {
-        return "Import a single keystore from an Electrum-GRS wallet (use File > Import > Electrum-GRS to import a multisig wallet).";
+    public String getKeystoreImportDescription(int account) {
+        return "Import a single keystore from an Electrum-GRS wallet (use File > Import > Electrum to import a multisig wallet).";
     }
 
     @Override
@@ -81,7 +83,7 @@ public class Electrum implements KeystoreFileImport, WalletImport, WalletExport 
                     if(ek.root_fingerprint == null && ek.ckcc_xfp != null) {
                         byte[] le = new byte[4];
                         Utils.uint32ToByteArrayLE(Long.parseLong(ek.ckcc_xfp), le, 0);
-                        ek.root_fingerprint = Utils.bytesToHex(le).toUpperCase();
+                        ek.root_fingerprint = Utils.bytesToHex(le).toUpperCase(Locale.ROOT);
                     }
                     ew.keystores.put(key, ek);
                 }
@@ -91,6 +93,10 @@ public class Electrum implements KeystoreFileImport, WalletImport, WalletExport 
                     for(String labelKey : jsonObject.keySet()) {
                         ew.labels.put(labelKey, jsonObject.get(labelKey).getAsString());
                     }
+                }
+
+                if(key.equals("gap_limit") && map.get(key) instanceof JsonPrimitive gapLimit) {
+                    ew.gap_limit = gapLimit.getAsInt();
                 }
 
                 if(key.equals("addresses")) {
@@ -161,8 +167,18 @@ public class Electrum implements KeystoreFileImport, WalletImport, WalletExport 
                         }
 
                         keystore.setSeed(new DeterministicSeed(mnemonic, passphrase, 0, DeterministicSeed.Type.ELECTRUM));
-                        if(derivationPath.equals("m/0")) {
-                            derivationPath = "m/0'";
+
+                        //Ensure the derivation path from the seed matches the provided xpub
+                        String[] possibleDerivations = {"m", "m/0", "m/0'"};
+                        for(String possibleDerivation : possibleDerivations) {
+                            List<ChildNumber> derivation = KeyDerivation.parsePath(possibleDerivation);
+                            DeterministicKey derivedKey = keystore.getExtendedMasterPrivateKey().getKey(derivation);
+                            DeterministicKey derivedKeyPublicOnly = derivedKey.dropPrivateBytes().dropParent();
+                            ExtendedKey xpub = new ExtendedKey(derivedKeyPublicOnly, derivedKey.getParentFingerprint(), derivation.isEmpty() ? ChildNumber.ZERO : derivation.get(derivation.size() - 1));
+                            if(xpub.equals(xPub)) {
+                                derivationPath = possibleDerivation;
+                                break;
+                            }
                         }
                     } else {
                         keystore.setSource(KeystoreSource.SW_WATCH);
@@ -177,6 +193,7 @@ public class Electrum implements KeystoreFileImport, WalletImport, WalletExport 
                     keystore.setLabel(keystore.getLabel().substring(0, Keystore.MAX_LABEL_LENGTH));
                 }
 
+                wallet.makeLabelsUnique(keystore);
                 wallet.getKeystores().add(keystore);
 
                 ExtendedKey.Header xpubHeader = ExtendedKey.Header.fromExtendedKey(ek.xpub);
@@ -197,6 +214,10 @@ public class Electrum implements KeystoreFileImport, WalletImport, WalletExport 
                 throw new ImportException("Unknown Electrum-GRS wallet type of " + ew.wallet_type);
             }
 
+            if(ew.gap_limit != null) {
+                wallet.setGapLimit(ew.gap_limit);
+            }
+
             for(String key : ew.labels.keySet()) {
                 try {
                     Sha256Hash txHash = Sha256Hash.wrap(key);
@@ -214,8 +235,24 @@ public class Electrum implements KeystoreFileImport, WalletImport, WalletExport 
                                 WalletNode purposeNode = wallet.getNode(keyPurpose);
                                 purposeNode.fillToIndex(keyPurposes.get(keyPurpose).size() - 1);
                                 for(WalletNode addressNode : purposeNode.getChildren()) {
-                                    if(address.equals(wallet.getAddress(addressNode))) {
+                                    if(address.equals(addressNode.getAddress())) {
                                         addressNode.setLabel(ew.labels.get(key));
+                                    }
+                                }
+                            }
+
+                            for(BlockTransaction blkTx : ew.transactions.values()) {
+                                if(blkTx.getLabel() == null) {
+                                    Transaction tx = blkTx.getTransaction();
+                                    for(TransactionOutput txOutput : tx.getOutputs()) {
+                                        try {
+                                            Address[] addresses = txOutput.getScript().getToAddresses();
+                                            if(Arrays.asList(addresses).contains(address)) {
+                                                blkTx.setLabel(ew.labels.get(key));
+                                            }
+                                        } catch(NonStandardScriptException ex) {
+                                            //ignore
+                                        }
                                     }
                                 }
                             }
@@ -236,7 +273,7 @@ public class Electrum implements KeystoreFileImport, WalletImport, WalletExport 
 
             return wallet;
         } catch (Exception e) {
-            throw new ImportException(e);
+            throw new ImportException("Error importing Electrum Wallet", e);
         }
     }
 
@@ -263,7 +300,7 @@ public class Electrum implements KeystoreFileImport, WalletImport, WalletExport 
     }
 
     @Override
-    public String getExportFileExtension() {
+    public String getExportFileExtension(Wallet wallet) {
         return "json";
     }
 
@@ -299,11 +336,11 @@ public class Electrum implements KeystoreFileImport, WalletImport, WalletExport 
                     ek.xpub = keystore.getExtendedPublicKey().toString(xpubHeader);
                     ek.xprv = keystore.getExtendedPrivateKey().toString(xprvHeader);
                     ek.pw_hash_version = 1;
-                    if(keystore.getSeed().getType() == DeterministicSeed.Type.ELECTRUM) {
+                    if(keystore.getSeed() == null || keystore.getSeed().getType() == DeterministicSeed.Type.BIP39) {
+                        ew.seed_type = "bip39";
+                    } else if(keystore.getSeed().getType() == DeterministicSeed.Type.ELECTRUM) {
                         ek.seed = keystore.getSeed().getMnemonicString().asString();
                         ek.passphrase = keystore.getSeed().getPassphrase() == null ? null : keystore.getSeed().getPassphrase().asString();
-                    } else if(keystore.getSeed().getType() == DeterministicSeed.Type.BIP39) {
-                        ew.seed_type = "bip39";
                     }
                     ew.use_encryption = false;
                 } else if(keystore.getSource() == KeystoreSource.SW_WATCH) {
@@ -338,9 +375,9 @@ public class Electrum implements KeystoreFileImport, WalletImport, WalletExport 
             String json = gson.toJson(eJson);
             outputStream.write(json.getBytes(StandardCharsets.UTF_8));
             outputStream.flush();
-            outputStream.close();
         } catch (Exception e) {
-            throw new ExportException(e);
+            log.error("Error exporting Electrum Wallet", e);
+            throw new ExportException("Error exporting Electrum Wallet", e);
         }
     }
 
@@ -360,8 +397,18 @@ public class Electrum implements KeystoreFileImport, WalletImport, WalletExport 
     }
 
     @Override
+    public boolean isWalletExportScannable() {
+        return false;
+    }
+
+    @Override
     public String getWalletExportDescription() {
         return "Export this wallet as an Electrum-GRS wallet file.";
+    }
+
+    @Override
+    public boolean walletExportRequiresDecryption() {
+        return true;
     }
 
     private static class ElectrumJsonWallet {
@@ -370,6 +417,7 @@ public class Electrum implements KeystoreFileImport, WalletImport, WalletExport 
         public String seed_type;
         public Boolean use_encryption;
         public ElectrumAddresses addresses;
+        public Integer gap_limit;
         public Map<String, String> labels = new LinkedHashMap<>();
         public Map<Sha256Hash, BlockTransaction> transactions = new HashMap<>();
     }

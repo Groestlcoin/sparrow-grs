@@ -1,15 +1,15 @@
 package com.sparrowwallet.sparrow.event;
 
+import com.sparrowwallet.drongo.wallet.Wallet;
+import com.sparrowwallet.sparrow.wallet.Function;
 import com.sparrowwallet.sparrow.wallet.NodeEntry;
 
-public class ReceiveActionEvent {
-    private final NodeEntry receiveEntry;
-
+public class ReceiveActionEvent extends FunctionActionEvent {
     public ReceiveActionEvent(NodeEntry receiveEntry) {
-        this.receiveEntry = receiveEntry;
+        super(Function.RECEIVE, receiveEntry.getWallet());
     }
 
-    public NodeEntry getReceiveEntry() {
-        return receiveEntry;
+    public ReceiveActionEvent(Wallet wallet) {
+        super(Function.RECEIVE, wallet);
     }
 }

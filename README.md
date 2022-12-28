@@ -4,29 +4,47 @@ Sparrow-GRS is a modern desktop Groestlcoin wallet application supporting most h
 
 More information (and release binaries) can be found at https://groestlcoin.org. Release binaries are also available directly from [Github](https://github.com/Groestlcoin/sparrow/releases).
 
+![Sparrow Wallet](https://sparrowwallet.com/assets/images/control-your-sends.png)
+
 ## Building
 
 To clone this project, use
 
 `git clone --recursive https://github.com/Groestlcoin/sparrow`
 
-In order to build, Sparrow requires Java 14 to be installed. The release packages can be built using
+or for those without SSH credentials:
+
+`git clone --recursive https://github.com/sparrowwallet/sparrow.git`
+
+In order to build, Sparrow requires Java 17 or higher to be installed. 
+The release binaries are built with [Eclipse Temurin 18.0.1+10](https://github.com/adoptium/temurin18-binaries/releases/tag/jdk-18.0.1%2B10).
+
+Other packages may also be necessary to build depending on the platform. On Debian/Ubuntu systems:
+
+`sudo apt install -y rpm fakeroot binutils`
+
+
+The Sparrow binaries can be built from source using
 
 `./gradlew jpackage`
+
+Note that to build the Windows installer, you will need to install [WiX](https://github.com/wixtoolset/wix3/releases).
 
 When updating to the latest HEAD
 
 `git pull --recurse-submodules`
 
-All jar files created are reproducible builds.
+The release binaries are reproducible from v1.5.0 onwards (pre codesigning and installer packaging). More detailed [instructions on reproducing the binaries](docs/reproducible.md) are provided.
+
+> Video documentation of your build process uploaded to [bitcoinbinary.org](https://bitcoinbinary.org/) is appreciated. Alternatively check the site if you wish to see if someone else already verified the provided binaries. 
 
 ## Running
 
-If you prefer to run Sparrow directly from source, it can be launched with
+If you prefer to run Sparrow directly from source, it can be launched from within the project directory with
 
 `./sparrow`
 
-Java 14 must be installed.
+Java 17 or higher must be installed. 
 
 ## Configuration
 
@@ -41,28 +59,31 @@ Usage: sparrow [options]
       Path to Sparrow home folder
     --help, -h
       Show usage
+    --level, -l
+      Set log level
+      Possible Values: [ERROR, WARN, INFO, DEBUG, TRACE]      
     --network, -n
       Network to use
-      Possible Values: [mainnet, testnet, regtest]
+      Possible Values: [mainnet, testnet, regtest, signet]
 ```
 
-As a fallback, the network (mainnet, testnet or regtest) can also be set using an environment variable `SPARROW_NETWORK`. For example:
+As a fallback, the network (mainnet, testnet, regtest or signet) can also be set using an environment variable `SPARROW_NETWORK`. For example:
 
 `export SPARROW_NETWORK=testnet`
 
 A final fallback which can be useful when running the Sparrow binary is to create a file called ``network-testnet`` in the Sparrow home folder (see below) to configure the testnet network.
 
-Note that if you are connecting to an Electrum-GRS server when using testnet, that server will need to running on testnet configuration as well.
+Note that if you are connecting to an Electrum-GRS server when using testnet, that server will need to be running on testnet configuration as well.
 
 When not explicitly configured using the command line argument above, Sparrow stores its mainnet config file, log file and wallets in a home folder location appropriate to the operating system:
 
-Platform | Location
--------- | --------
-OSX      | ~/.sparrow-grs
-Linux    | ~/.sparrow-grs
-Windows  | %APPDATA%/Sparrow-GRS
+| Platform | Location              |
+|----------|-----------------------|
+| OSX      | ~/.sparrow-grs        |
+| Linux    | ~/.sparrow-grs        |
+| Windows  | %APPDATA%/Sparrow-grs |
 
-Testnet and regtest configurations (along with their wallets) are stored in subfolders to allow easy switching between networks.
+Testnet, regtest and signet configurations (along with their wallets) are stored in subfolders to allow easy switching between networks.
 
 ## Reporting Issues
 
@@ -71,6 +92,12 @@ Please use the [Issues](https://github.com/Groestlcoin/sparrow/issues) tab above
 ## License
 
 Sparrow-GRS is licensed under the Apache 2 software licence.
+
+## GPG Key
+
+The Sparrow release binaries here and on [sparrowwallet.com](https://sparrowwallet.com/download/) are signed using [craigraw's GPG key](https://keybase.io/craigraw):  
+Fingerprint: D4D0D3202FC06849A257B38DE94618334C674B40  
+64-bit: E946 1833 4C67 4B40
 
 ## Credit
 

@@ -1,20 +1,26 @@
 package com.sparrowwallet.sparrow.preferences;
 
+import com.github.arteam.simplejsonrpc.client.exception.JsonRpcException;
+import com.google.common.base.Throwables;
 import com.google.common.eventbus.Subscribe;
 import com.google.common.net.HostAndPort;
 import com.sparrowwallet.drongo.Network;
 import com.sparrowwallet.sparrow.AppServices;
 import com.sparrowwallet.sparrow.EventManager;
 import com.sparrowwallet.sparrow.Mode;
+import com.sparrowwallet.sparrow.control.ComboBoxTextField;
 import com.sparrowwallet.sparrow.control.TextFieldValidator;
 import com.sparrowwallet.sparrow.control.UnlabeledToggleSwitch;
 import com.sparrowwallet.sparrow.event.*;
 import com.sparrowwallet.sparrow.glyphfont.FontAwesome5;
 import com.sparrowwallet.sparrow.io.Config;
+import com.sparrowwallet.sparrow.io.Server;
+import com.sparrowwallet.sparrow.io.Storage;
 import com.sparrowwallet.sparrow.net.*;
 import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
-import javafx.concurrent.WorkerStateEvent;
+import javafx.collections.FXCollections;
+import javafx.collections.ObservableList;
 import javafx.fxml.FXML;
 import javafx.scene.control.*;
 import javafx.scene.text.Font;
@@ -22,6 +28,9 @@ import javafx.stage.DirectoryChooser;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 import javafx.util.Duration;
+import javafx.util.StringConverter;
+import org.berndpruenster.netlayer.tor.Tor;
+import org.controlsfx.control.SegmentedButton;
 import org.controlsfx.glyphfont.Glyph;
 import org.controlsfx.validation.ValidationResult;
 import org.controlsfx.validation.ValidationSupport;
@@ -33,25 +42,53 @@ import org.slf4j.LoggerFactory;
 import tornadofx.control.Field;
 import tornadofx.control.Form;
 
-import javax.net.ssl.SSLHandshakeException;
 import java.io.File;
 import java.io.FileInputStream;
 import java.security.cert.CertificateFactory;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.Random;
 
 public class ServerPreferencesController extends PreferencesDetailController {
     private static final Logger log = LoggerFactory.getLogger(ServerPreferencesController.class);
+
+    private static final Server MANAGE_ALIASES_SERVER = new Server("tcp://localhost", "Manage Aliases...");
 
     @FXML
     private ToggleGroup serverTypeToggleGroup;
 
     @FXML
+    private SegmentedButton serverTypeSegmentedButton;
+
+    @FXML
+    private ToggleButton publicElectrumToggle;
+
+    @FXML
+    private Form publicElectrumForm;
+
+    @FXML
+    private ComboBox<PublicElectrumServer> publicElectrumServer;
+
+    @FXML
+    private UnlabeledToggleSwitch publicUseProxy;
+
+    @FXML
+    private TextField publicProxyHost;
+
+    @FXML
+    private TextField publicProxyPort;
+
+    @FXML
     private Form coreForm;
 
     @FXML
-    private TextField coreHost;
+    private ComboBox<Server> recentCoreServers;
+
+    @FXML
+    private ComboBoxTextField coreHost;
 
     @FXML
     private TextField corePort;
@@ -78,16 +115,22 @@ public class ServerPreferencesController extends PreferencesDetailController {
     private PasswordField corePass;
 
     @FXML
-    private UnlabeledToggleSwitch coreMultiWallet;
+    private UnlabeledToggleSwitch coreUseProxy;
 
     @FXML
-    private TextField coreWallet;
+    private TextField coreProxyHost;
+
+    @FXML
+    private TextField coreProxyPort;
 
     @FXML
     private Form electrumForm;
 
     @FXML
-    private TextField electrumHost;
+    private ComboBox<Server> recentElectrumServers;
+
+    @FXML
+    private ComboBoxTextField electrumHost;
 
     @FXML
     private TextField electrumPort;
@@ -121,24 +164,35 @@ public class ServerPreferencesController extends PreferencesDetailController {
 
     private final ValidationSupport validationSupport = new ValidationSupport();
 
+    private TorService torService;
+
     private ElectrumServer.ConnectionService connectionService;
+
+    private Boolean useSslOriginal;
+
+    private Boolean useProxyOriginal;
 
     @Override
     public void initializeView(Config config) {
         EventManager.get().register(this);
         getMasterController().closingProperty().addListener((observable, oldValue, newValue) -> {
             EventManager.get().unregister(this);
+            if(connectionService != null && connectionService.isRunning()) {
+                connectionService.cancel();
+            }
         });
 
         Platform.runLater(this::setupValidation);
 
+        publicElectrumForm.managedProperty().bind(publicElectrumForm.visibleProperty());
         coreForm.managedProperty().bind(coreForm.visibleProperty());
         electrumForm.managedProperty().bind(electrumForm.visibleProperty());
-        coreForm.visibleProperty().bind(electrumForm.visibleProperty().not());
         serverTypeToggleGroup.selectedToggleProperty().addListener((observable, oldValue, newValue) -> {
             if(serverTypeToggleGroup.getSelectedToggle() != null) {
                 ServerType existingType = config.getServerType();
                 ServerType serverType = (ServerType)newValue.getUserData();
+                publicElectrumForm.setVisible(serverType == ServerType.PUBLIC_ELECTRUM_SERVER);
+                coreForm.setVisible(serverType == ServerType.BITCOIN_CORE);
                 electrumForm.setVisible(serverType == ServerType.ELECTRUM_SERVER);
                 config.setServerType(serverType);
                 testConnection.setGraphic(getGlyph(FontAwesome5.Glyph.QUESTION_CIRCLE, ""));
@@ -150,12 +204,28 @@ public class ServerPreferencesController extends PreferencesDetailController {
                 oldValue.setSelected(true);
             }
         });
-        ServerType serverType = config.getServerType() != null ? config.getServerType() : (config.getCoreServer() == null && config.getElectrumServer() != null ? ServerType.ELECTRUM_SERVER : ServerType.BITCOIN_CORE);
+        ServerType serverType = config.getServerType() != null ?
+                (config.getServerType() == ServerType.PUBLIC_ELECTRUM_SERVER && !PublicElectrumServer.supportedNetwork() ? ServerType.BITCOIN_CORE : config.getServerType()) :
+                    (config.getCoreServer() == null && config.getElectrumServer() != null ? ServerType.ELECTRUM_SERVER :
+                        (config.getCoreServer() != null || !PublicElectrumServer.supportedNetwork() ? ServerType.BITCOIN_CORE : ServerType.PUBLIC_ELECTRUM_SERVER));
+        if(!PublicElectrumServer.supportedNetwork()) {
+            serverTypeSegmentedButton.getButtons().remove(publicElectrumToggle);
+            serverTypeToggleGroup.getToggles().remove(publicElectrumToggle);
+        }
         serverTypeToggleGroup.selectToggle(serverTypeToggleGroup.getToggles().stream().filter(toggle -> toggle.getUserData() == serverType).findFirst().orElse(null));
+
+        publicElectrumServer.setItems(FXCollections.observableList(PublicElectrumServer.getServers()));
+        publicElectrumServer.getSelectionModel().selectedItemProperty().addListener(getPublicElectrumServerListener(config));
+
+        publicUseProxy.selectedProperty().bindBidirectional(useProxy.selectedProperty());
+        publicProxyHost.textProperty().bindBidirectional(proxyHost.textProperty());
+        publicProxyPort.textProperty().bindBidirectional(proxyPort.textProperty());
 
         corePort.setTextFormatter(new TextFieldValidator(TextFieldValidator.ValidationModus.MAX_INTEGERS, 5).getFormatter());
         electrumPort.setTextFormatter(new TextFieldValidator(TextFieldValidator.ValidationModus.MAX_INTEGERS, 5).getFormatter());
         proxyPort.setTextFormatter(new TextFieldValidator(TextFieldValidator.ValidationModus.MAX_INTEGERS, 5).getFormatter());
+        coreProxyPort.setTextFormatter(new TextFieldValidator(TextFieldValidator.ValidationModus.MAX_INTEGERS, 5).getFormatter());
+        publicProxyPort.setTextFormatter(new TextFieldValidator(TextFieldValidator.ValidationModus.MAX_INTEGERS, 5).getFormatter());
 
         coreHost.textProperty().addListener(getBitcoinCoreListener(config));
         corePort.textProperty().addListener(getBitcoinCoreListener(config));
@@ -163,7 +233,9 @@ public class ServerPreferencesController extends PreferencesDetailController {
         coreUser.textProperty().addListener(getBitcoinAuthListener(config));
         corePass.textProperty().addListener(getBitcoinAuthListener(config));
 
-        coreWallet.textProperty().addListener(getBitcoinWalletListener(config));
+        coreUseProxy.selectedProperty().bindBidirectional(useProxy.selectedProperty());
+        coreProxyHost.textProperty().bindBidirectional(proxyHost.textProperty());
+        coreProxyPort.textProperty().bindBidirectional(proxyPort.textProperty());
 
         electrumHost.textProperty().addListener(getElectrumServerListener(config));
         electrumPort.textProperty().addListener(getElectrumServerListener(config));
@@ -204,9 +276,53 @@ public class ServerPreferencesController extends PreferencesDetailController {
             }
         });
 
-        coreMultiWallet.selectedProperty().addListener((observable, oldValue, newValue) -> {
-            config.setCoreMultiWallet(newValue);
-            coreWallet.setDisable(!newValue);
+        recentCoreServers.setCellFactory(value -> new ServerCell());
+        recentCoreServers.setItems(getObservableServerList(Config.get().getRecentCoreServers()));
+        recentCoreServers.prefWidthProperty().bind(coreHost.widthProperty());
+        recentCoreServers.valueProperty().addListener((observable, oldValue, newValue) -> {
+            if(newValue != null) {
+                if(newValue == MANAGE_ALIASES_SERVER) {
+                    ServerAliasDialog serverAliasDialog = new ServerAliasDialog(ServerType.BITCOIN_CORE);
+                    Optional<Server> optServer = serverAliasDialog.showAndWait();
+                    recentCoreServers.setItems(getObservableServerList(Config.get().getRecentCoreServers()));
+                    Server selectedServer = optServer.orElseGet(() -> Config.get().getCoreServer());
+                    Platform.runLater(() -> recentCoreServers.setValue(selectedServer));
+                } else if(newValue.getHostAndPort() != null) {
+                    HostAndPort hostAndPort = newValue.getHostAndPort();
+                    corePort.setText(hostAndPort.hasPort() ? Integer.toString(hostAndPort.getPort()) : "");
+                    if(newValue.getAlias() != null) {
+                        coreHost.setText(newValue.getAlias());
+                    } else {
+                        coreHost.setText(hostAndPort.getHost());
+                    }
+                    coreHost.positionCaret(coreHost.getText().length());
+                }
+            }
+        });
+
+        recentElectrumServers.setCellFactory(value -> new ServerCell());
+        recentElectrumServers.setItems(getObservableServerList(Config.get().getRecentElectrumServers()));
+        recentElectrumServers.prefWidthProperty().bind(electrumHost.widthProperty());
+        recentElectrumServers.valueProperty().addListener((observable, oldValue, newValue) -> {
+            if(newValue != null) {
+                if(newValue == MANAGE_ALIASES_SERVER) {
+                    ServerAliasDialog serverAliasDialog = new ServerAliasDialog(ServerType.ELECTRUM_SERVER);
+                    Optional<Server> optServer = serverAliasDialog.showAndWait();
+                    recentElectrumServers.setItems(getObservableServerList(Config.get().getRecentElectrumServers()));
+                    Server selectedServer = optServer.orElseGet(() -> Config.get().getElectrumServer());
+                    Platform.runLater(() -> recentElectrumServers.setValue(selectedServer));
+                } else if(newValue.getHostAndPort() != null) {
+                    HostAndPort hostAndPort = newValue.getHostAndPort();
+                    electrumPort.setText(hostAndPort.hasPort() ? Integer.toString(hostAndPort.getPort()) : "");
+                    electrumUseSsl.setSelected(newValue.getProtocol() == Protocol.SSL);
+                    if(newValue.getAlias() != null) {
+                        electrumHost.setText(newValue.getAlias());
+                    } else {
+                        electrumHost.setText(hostAndPort.getHost());
+                    }
+                    electrumHost.positionCaret(electrumHost.getText().length());
+                }
+            }
         });
 
         electrumUseSsl.selectedProperty().addListener((observable, oldValue, newValue) -> {
@@ -230,6 +346,7 @@ public class ServerPreferencesController extends PreferencesDetailController {
                     new FileChooser.ExtensionFilter("CRT", "*.crt")
             );
 
+            AppServices.moveToActiveWindowScreen(window, 800, 450);
             File file = fileChooser.showOpenDialog(window);
             if(file != null) {
                 electrumCertificate.setText(file.getAbsolutePath());
@@ -242,18 +359,13 @@ public class ServerPreferencesController extends PreferencesDetailController {
             proxyHost.setText(proxyHost.getText().trim());
             proxyHost.setDisable(!newValue);
             proxyPort.setDisable(!newValue);
-
-            if(newValue) {
-                electrumUseSsl.setSelected(true);
-                electrumUseSsl.setDisable(true);
-            } else {
-                electrumUseSsl.setDisable(false);
-            }
+            publicProxyHost.setDisable(!newValue);
+            publicProxyPort.setDisable(!newValue);
         });
 
         boolean isConnected = AppServices.isConnecting() || AppServices.isConnected();
 
-        if(AppServices.isConnecting()) {
+        if(Config.get().getServerType() == ServerType.BITCOIN_CORE && AppServices.isConnecting()) {
             testResults.appendText("Connecting to server, please wait...");
         }
 
@@ -262,13 +374,18 @@ public class ServerPreferencesController extends PreferencesDetailController {
         setTestResultsFont();
         testConnection.setOnAction(event -> {
             testConnection.setGraphic(getGlyph(FontAwesome5.Glyph.ELLIPSIS_H, null));
-            testResults.setText("Connecting to " + config.getServerAddress() + "...");
-            startElectrumConnection();
+            testResults.setText("Connecting " + (config.hasServer() ? "to " + config.getServer().getUrl() : "") + "...");
+
+            if(Config.get().requiresInternalTor() && Tor.getDefault() == null) {
+                startTor();
+            } else {
+                startElectrumConnection();
+            }
         });
 
         editConnection.managedProperty().bind(editConnection.visibleProperty());
         editConnection.setVisible(isConnected);
-        editConnection.setDisable(AppServices.isConnecting());
+        editConnection.setDisable(Config.get().getServerType() == ServerType.BITCOIN_CORE && AppServices.isConnecting());
         editConnection.setOnAction(event -> {
             EventManager.get().post(new RequestDisconnectEvent());
             setFieldsEditable(true);
@@ -276,16 +393,26 @@ public class ServerPreferencesController extends PreferencesDetailController {
             testConnection.setVisible(true);
         });
 
-        String coreServer = config.getCoreServer();
-        if(coreServer != null) {
-            Protocol protocol = Protocol.getProtocol(coreServer);
+        PublicElectrumServer configPublicElectrumServer = PublicElectrumServer.fromServer(config.getPublicElectrumServer());
+        if(configPublicElectrumServer == null && PublicElectrumServer.supportedNetwork()) {
+            List<PublicElectrumServer> servers = PublicElectrumServer.getServers();
+            if(!servers.isEmpty()) {
+                publicElectrumServer.setValue(servers.get(new Random().nextInt(servers.size())));
+            }
+        } else {
+            publicElectrumServer.setValue(configPublicElectrumServer);
+        }
 
-            if(protocol != null) {
-                HostAndPort server = protocol.getServerHostAndPort(coreServer);
-                coreHost.setText(server.getHost());
-                if(server.hasPort()) {
-                    corePort.setText(Integer.toString(server.getPort()));
-                }
+        Server coreServer = config.getCoreServer();
+        if(coreServer != null) {
+            HostAndPort hostAndPort = coreServer.getHostAndPort();
+            Server server = config.getRecentCoreServers().stream().filter(coreServer::equals).findFirst().orElse(null);
+            if(server != null) {
+                coreHost.setLeft(getGlyph(FontAwesome5.Glyph.TAG, null));
+            }
+            coreHost.setText(server == null || server.getAlias() == null ? hostAndPort.getHost() : server.getAlias());
+            if(hostAndPort.hasPort()) {
+                corePort.setText(Integer.toString(hostAndPort.getPort()));
             }
         } else {
             coreHost.setText("127.0.0.1");
@@ -304,30 +431,22 @@ public class ServerPreferencesController extends PreferencesDetailController {
             }
         }
 
-        coreWallet.setPromptText("Default");
-        if(config.getCoreWallet() == null) {
-            coreWallet.setText(Bwt.DEFAULT_CORE_WALLET);
-        } else {
-            coreWallet.setText(config.getCoreWallet());
-        }
-
-        coreMultiWallet.setSelected(config.getCoreMultiWallet() != Boolean.FALSE);
-
-        String electrumServer = config.getElectrumServer();
+        Server electrumServer = config.getElectrumServer();
         if(electrumServer != null) {
-            Protocol protocol = Protocol.getProtocol(electrumServer);
+            Protocol protocol = electrumServer.getProtocol();
+            boolean ssl = protocol.equals(Protocol.SSL);
+            electrumUseSsl.setSelected(ssl);
+            electrumCertificate.setDisable(!ssl);
+            electrumCertificateSelect.setDisable(!ssl);
 
-            if(protocol != null) {
-                boolean ssl = protocol.equals(Protocol.SSL);
-                electrumUseSsl.setSelected(ssl);
-                electrumCertificate.setDisable(!ssl);
-                electrumCertificateSelect.setDisable(!ssl);
-
-                HostAndPort server = protocol.getServerHostAndPort(electrumServer);
-                electrumHost.setText(server.getHost());
-                if(server.hasPort()) {
-                    electrumPort.setText(Integer.toString(server.getPort()));
-                }
+            HostAndPort hostAndPort = electrumServer.getHostAndPort();
+            Server server = config.getRecentElectrumServers().stream().filter(electrumServer::equals).findFirst().orElse(null);
+            if(server != null) {
+                electrumHost.setLeft(getGlyph(FontAwesome5.Glyph.TAG, null));
+            }
+            electrumHost.setText(server == null || server.getAlias() == null ? hostAndPort.getHost() : server.getAlias());
+            if(hostAndPort.hasPort()) {
+                electrumPort.setText(Integer.toString(hostAndPort.getPort()));
             }
         }
 
@@ -339,11 +458,8 @@ public class ServerPreferencesController extends PreferencesDetailController {
         useProxy.setSelected(config.isUseProxy());
         proxyHost.setDisable(!config.isUseProxy());
         proxyPort.setDisable(!config.isUseProxy());
-
-        if(config.isUseProxy()) {
-            electrumUseSsl.setSelected(true);
-            electrumUseSsl.setDisable(true);
-        }
+        publicProxyHost.setDisable(!config.isUseProxy());
+        publicProxyPort.setDisable(!config.isUseProxy());
 
         String proxyServer = config.getProxyServer();
         if(proxyServer != null) {
@@ -357,6 +473,44 @@ public class ServerPreferencesController extends PreferencesDetailController {
         setFieldsEditable(!isConnected);
     }
 
+    private void startTor() {
+        if(torService != null && torService.isRunning()) {
+            return;
+        }
+
+        torService = new TorService();
+        torService.setPeriod(Duration.hours(1000));
+        torService.setRestartOnFailure(false);
+
+        torService.setOnSucceeded(workerStateEvent -> {
+            Tor.setDefault(torService.getValue());
+            torService.cancel();
+            testResults.appendText("\nTor running, connecting to " + Config.get().getServer().getUrl() + "...");
+            startElectrumConnection();
+        });
+        torService.setOnFailed(workerStateEvent -> {
+            torService.cancel();
+            testResults.appendText("\nTor failed to start");
+            showConnectionFailure(workerStateEvent.getSource().getException());
+
+            Throwable exception = workerStateEvent.getSource().getException();
+            if(Config.get().getServerType() == ServerType.ELECTRUM_SERVER &&
+                    exception instanceof TorServerAlreadyBoundException &&
+                    useProxyOriginal == null && !useProxy.isSelected() &&
+                    (proxyHost.getText().isEmpty() || proxyHost.getText().equals("localhost") || proxyHost.getText().equals("127.0.0.1")) &&
+                    (proxyPort.getText().isEmpty() || proxyPort.getText().equals("9050"))) {
+                useProxy.setSelected(true);
+                proxyHost.setText("localhost");
+                proxyPort.setText("9050");
+                useProxyOriginal = false;
+                testResults.appendText("\n\nAssuming Tor proxy is running on port 9050 and trying again...");
+                startElectrumConnection();
+            }
+        });
+
+        torService.start();
+    }
+
     private void startElectrumConnection() {
         if(connectionService != null && connectionService.isRunning()) {
             connectionService.cancel();
@@ -364,10 +518,10 @@ public class ServerPreferencesController extends PreferencesDetailController {
 
         connectionService = new ElectrumServer.ConnectionService(false);
         connectionService.setPeriod(Duration.hours(1));
+        connectionService.setRestartOnFailure(false);
         EventManager.get().register(connectionService);
-        connectionService.statusProperty().addListener((observable, oldValue, newValue) -> {
-            testResults.setText(testResults.getText() + "\n" + newValue);
-        });
+
+        useSslOriginal = null;
 
         connectionService.setOnSucceeded(successEvent -> {
             EventManager.get().unregister(connectionService);
@@ -376,17 +530,64 @@ public class ServerPreferencesController extends PreferencesDetailController {
             getMasterController().reconnectOnClosingProperty().set(true);
             Config.get().setMode(Mode.ONLINE);
             connectionService.cancel();
+            useProxyOriginal = null;
+            if(Config.get().addRecentServer()) {
+                if(Config.get().getServerType() == ServerType.BITCOIN_CORE) {
+                    recentCoreServers.setItems(getObservableServerList(Config.get().getRecentCoreServers()));
+                } else if(Config.get().getServerType() == ServerType.ELECTRUM_SERVER) {
+                    recentElectrumServers.setItems(getObservableServerList(Config.get().getRecentElectrumServers()));
+                }
+            }
         });
         connectionService.setOnFailed(workerStateEvent -> {
             EventManager.get().unregister(connectionService);
-            showConnectionFailure(workerStateEvent);
+            if(connectionService.isShutdown()) {
+                connectionService.cancel();
+                return;
+            }
+
+            showConnectionFailure(workerStateEvent.getSource().getException());
             connectionService.cancel();
+
+            if(Config.get().getServerType() == ServerType.ELECTRUM_SERVER) {
+                if(useSslOriginal == null) {
+                    Integer portAsInteger = getPort(electrumPort.getText());
+                    if(!electrumUseSsl.isSelected() && portAsInteger != null && portAsInteger == Protocol.SSL.getDefaultPort()) {
+                        useSslOriginal = false;
+                        electrumUseSsl.setSelected(true);
+                    } else if(electrumUseSsl.isSelected() && portAsInteger != null && portAsInteger == Protocol.TCP.getDefaultPort()) {
+                        useSslOriginal = true;
+                        electrumUseSsl.setSelected(false);
+                    }
+
+                    if(useSslOriginal != null) {
+                        EventManager.get().register(connectionService);
+                        connectionService.reset();
+                        connectionService.start();
+                    }
+                } else {
+                    electrumUseSsl.setSelected(useSslOriginal);
+                    useSslOriginal = null;
+                }
+            }
+
+            if(useProxyOriginal != null && !useProxyOriginal) {
+                useProxy.setSelected(false);
+                proxyHost.setText("");
+                proxyPort.setText("");
+                useProxyOriginal = null;
+            }
         });
         connectionService.start();
     }
 
     private void setFieldsEditable(boolean editable) {
         serverTypeToggleGroup.getToggles().forEach(toggle -> ((ToggleButton)toggle).setDisable(!editable));
+
+        publicElectrumServer.setDisable(!editable);
+        publicUseProxy.setDisable(!editable);
+        publicProxyHost.setDisable(!editable);
+        publicProxyPort.setDisable(!editable);
 
         coreHost.setDisable(!editable);
         corePort.setDisable(!editable);
@@ -395,8 +596,9 @@ public class ServerPreferencesController extends PreferencesDetailController {
         coreDataDirSelect.setDisable(!editable);
         coreUser.setDisable(!editable);
         corePass.setDisable(!editable);
-        coreMultiWallet.setDisable(!editable);
-        coreWallet.setDisable(!editable);
+        coreUseProxy.setDisable(!editable);
+        coreProxyHost.setDisable(!editable);
+        coreProxyPort.setDisable(!editable);
 
         electrumHost.setDisable(!editable);
         electrumPort.setDisable(!editable);
@@ -421,12 +623,43 @@ public class ServerPreferencesController extends PreferencesDetailController {
         }
     }
 
-    private void showConnectionFailure(WorkerStateEvent failEvent) {
-        Throwable e = failEvent.getSource().getException();
-        log.error("Connection error", e);
-        String reason = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
-        if(e.getCause() != null && e.getCause() instanceof SSLHandshakeException) {
-            reason = "SSL Handshake Error\n" + reason;
+    private void showConnectionFailure(Throwable exception) {
+        log.error("Connection error", exception);
+
+        String reason;
+        if(Throwables.getRootCause(exception) instanceof JsonRpcException jsonRpcException && jsonRpcException.getErrorMessage() != null) {
+            reason = jsonRpcException.getErrorMessage().getMessage() + (jsonRpcException.getErrorMessage().getData() != null ? " (" + jsonRpcException.getErrorMessage().getData().asText() + ")" : "");
+        } else {
+            reason = exception.getCause() != null ? exception.getCause().getMessage() : exception.getMessage();
+        }
+
+        if(exception instanceof TlsServerException && exception.getCause() != null) {
+            TlsServerException tlsServerException = (TlsServerException)exception;
+            if(exception.getCause().getMessage().contains("PKIX path building failed")) {
+                File configCrtFile = Config.get().getElectrumServerCert();
+                File savedCrtFile = Storage.getCertificateFile(tlsServerException.getServer().getHost());
+                if(configCrtFile == null && savedCrtFile != null) {
+                    Optional<ButtonType> optButton = AppServices.showErrorDialog("SSL Handshake Failed", "The certificate provided by the server at " + tlsServerException.getServer().getHost() + " appears to have changed." +
+                            "\n\nThis may indicate a man-in-the-middle attack!" +
+                            "\n\nDo you still want to proceed?", ButtonType.NO, ButtonType.YES);
+                    if(optButton.isPresent() && optButton.get() == ButtonType.YES) {
+                        if(savedCrtFile.delete()) {
+                            Platform.runLater(this::startElectrumConnection);
+                            return;
+                        } else {
+                            AppServices.showErrorDialog("Could not delete certificate", "The certificate file at " + savedCrtFile.getAbsolutePath() + " could not be deleted.\n\nPlease delete this file manually.");
+                        }
+                    }
+                }
+            }
+
+            reason = tlsServerException.getMessage() + "\n\n" + reason;
+        } else if(exception instanceof ProxyServerException) {
+            reason += ". Check if the proxy server is running.";
+        } else if(exception instanceof TorServerAlreadyBoundException) {
+            reason += "\nIs a Tor proxy already running on port " + TorService.PROXY_PORT + "?";
+        } else if(reason != null && (reason.contains("Check if Bitcoin Core is running") || reason.contains("Could not connect to Bitcoin Core RPC"))) {
+            reason += "\n\nSee https://sparrowwallet.com/docs/connect-node.html";
         }
 
         testResults.setText("Could not connect:\n\n" + reason);
@@ -434,6 +667,17 @@ public class ServerPreferencesController extends PreferencesDetailController {
     }
 
     private void setupValidation() {
+        validationSupport.setValidationDecorator(new StyleClassValidationDecoration());
+
+        validationSupport.registerValidator(publicProxyHost, Validator.combine(
+                (Control c, String newValue) -> ValidationResult.fromErrorIf( c, "Proxy host required", publicUseProxy.isSelected() && newValue.isEmpty()),
+                (Control c, String newValue) -> ValidationResult.fromErrorIf( c, "Invalid host name", getHost(newValue) == null)
+        ));
+
+        validationSupport.registerValidator(publicProxyPort, Validator.combine(
+                (Control c, String newValue) -> ValidationResult.fromErrorIf( c, "Invalid proxy port", !newValue.isEmpty() && !isValidPort(Integer.parseInt(newValue)))
+        ));
+
         validationSupport.registerValidator(coreHost, Validator.combine(
                 (Control c, String newValue) -> ValidationResult.fromErrorIf( c, "Invalid Core host", getHost(newValue) == null)
         ));
@@ -474,24 +718,38 @@ public class ServerPreferencesController extends PreferencesDetailController {
         validationSupport.registerValidator(electrumCertificate, Validator.combine(
                 (Control c, String newValue) -> ValidationResult.fromErrorIf( c, "Invalid certificate file", newValue != null && !newValue.isEmpty() && getCertificate(newValue) == null)
         ));
+    }
 
-        validationSupport.setValidationDecorator(new StyleClassValidationDecoration());
+    @NotNull
+    private ChangeListener<PublicElectrumServer> getPublicElectrumServerListener(Config config) {
+        return (observable, oldValue, newValue) -> {
+            config.setPublicElectrumServer(newValue.getServer());
+        };
     }
 
     @NotNull
     private ChangeListener<String> getBitcoinCoreListener(Config config) {
         return (observable, oldValue, newValue) -> {
+            Server existingServer = config.getRecentCoreServers().stream().filter(server -> coreHost.getText().equals(server.getAlias())).findFirst().orElse(null);
+            coreHost.setLeft(existingServer == null ? null : getGlyph(FontAwesome5.Glyph.TAG, null));
             setCoreServerInConfig(config);
         };
     }
 
     private void setCoreServerInConfig(Config config) {
+        Server existingServer = config.getRecentCoreServers().stream().filter(server -> coreHost.getText().equals(server.getAlias())).findFirst().orElse(null);
+        if(existingServer != null) {
+            config.setCoreServer(existingServer);
+            return;
+        }
+
         String hostAsString = getHost(coreHost.getText());
         Integer portAsInteger = getPort(corePort.getText());
         if(hostAsString != null && portAsInteger != null && isValidPort(portAsInteger)) {
-            config.setCoreServer(Protocol.HTTP.toUrlString(hostAsString, portAsInteger));
+            Protocol protocol = portAsInteger == Protocol.HTTPS.getDefaultPort() ? Protocol.HTTPS : Protocol.HTTP;
+            config.setCoreServer(new Server(protocol.toUrlString(hostAsString, portAsInteger)));
         } else if(hostAsString != null) {
-            config.setCoreServer(Protocol.HTTP.toUrlString(hostAsString));
+            config.setCoreServer(new Server(Protocol.HTTP.toUrlString(hostAsString)));
         }
     }
 
@@ -503,26 +761,27 @@ public class ServerPreferencesController extends PreferencesDetailController {
     }
 
     @NotNull
-    private ChangeListener<String> getBitcoinWalletListener(Config config) {
-        return (observable, oldValue, newValue) -> {
-            config.setCoreWallet(coreWallet.getText());
-        };
-    }
-
-    @NotNull
     private ChangeListener<String> getElectrumServerListener(Config config) {
         return (observable, oldValue, newValue) -> {
+            Server existingServer = config.getRecentElectrumServers().stream().filter(server -> electrumHost.getText().equals(server.getAlias())).findFirst().orElse(null);
+            electrumHost.setLeft(existingServer == null ? null : getGlyph(FontAwesome5.Glyph.TAG, null));
             setElectrumServerInConfig(config);
         };
     }
 
     private void setElectrumServerInConfig(Config config) {
+        Server existingServer = config.getRecentElectrumServers().stream().filter(server -> electrumHost.getText().equals(server.getAlias())).findFirst().orElse(null);
+        if(existingServer != null) {
+            config.setElectrumServer(existingServer);
+            return;
+        }
+
         String hostAsString = getHost(electrumHost.getText());
         Integer portAsInteger = getPort(electrumPort.getText());
         if(hostAsString != null && portAsInteger != null && isValidPort(portAsInteger)) {
-            config.setElectrumServer(getProtocol().toUrlString(hostAsString, portAsInteger));
+            config.setElectrumServer(new Server(getProtocol().toUrlString(hostAsString, portAsInteger)));
         } else if(hostAsString != null) {
-            config.setElectrumServer(getProtocol().toUrlString(hostAsString));
+            config.setElectrumServer(new Server(getProtocol().toUrlString(hostAsString)));
         }
     }
 
@@ -590,7 +849,7 @@ public class ServerPreferencesController extends PreferencesDetailController {
         }
     }
 
-    private Glyph getGlyph(FontAwesome5.Glyph glyphName, String styleClass) {
+    private static Glyph getGlyph(FontAwesome5.Glyph glyphName, String styleClass) {
         Glyph glyph = new Glyph(FontAwesome5.FONT_NAME, glyphName);
         glyph.setFontSize(12);
         if(styleClass != null) {
@@ -626,6 +885,24 @@ public class ServerPreferencesController extends PreferencesDetailController {
         }
     }
 
+    private ObservableList<Server> getObservableServerList(List<Server> servers) {
+        ObservableList<Server> serverObservableList = FXCollections.observableList(new ArrayList<>(servers));
+        serverObservableList.add(MANAGE_ALIASES_SERVER);
+        return serverObservableList;
+    }
+
+    @Subscribe
+    public void cormorantSyncStatus(CormorantSyncStatusEvent event) {
+        editConnection.setDisable(false);
+        if(connectionService != null && connectionService.isRunning() && event.getProgress() < 100) {
+            DateFormat dateFormat = new SimpleDateFormat("yyyy/MM/dd HH:mm");
+            testResults.appendText("\nThe connection to the Bitcoin Core node was successful, but it is still syncing and cannot be used yet.");
+            testResults.appendText("\nCurrently " + event.getProgress() + "% completed to date " + dateFormat.format(event.getTip()));
+            testConnection.setGraphic(getGlyph(FontAwesome5.Glyph.QUESTION_CIRCLE, null));
+            connectionService.cancel();
+        }
+    }
+
     @Subscribe
     public void bwtStatus(BwtStatusEvent event) {
         if(!(event instanceof BwtSyncStatusEvent)) {
@@ -645,6 +922,40 @@ public class ServerPreferencesController extends PreferencesDetailController {
             testResults.appendText("\nCurrently " + event.getProgress() + "% completed to date " + dateFormat.format(event.getTip()));
             testConnection.setGraphic(getGlyph(FontAwesome5.Glyph.QUESTION_CIRCLE, null));
             connectionService.cancel();
+        }
+    }
+
+    @Subscribe
+    public void torStatus(TorStatusEvent event) {
+        Platform.runLater(() -> {
+            if(torService != null && torService.isRunning()) {
+                testResults.appendText("\n" + event.getStatus());
+            }
+        });
+    }
+
+    private static class ServerCell extends ListCell<Server> {
+        @Override
+        protected void updateItem(Server server, boolean empty) {
+            super.updateItem(server, empty);
+            if(server == null || empty) {
+                setText("");
+                setGraphic(null);
+            } else {
+                String serverAlias = server.getAlias();
+
+                if(server == MANAGE_ALIASES_SERVER) {
+                    setText(serverAlias);
+                    setStyle("-fx-font-style: italic");
+                    setGraphic(null);
+                } else if(serverAlias != null) {
+                    setText(serverAlias);
+                    setGraphic(getGlyph(FontAwesome5.Glyph.TAG, null));
+                } else {
+                    setText(server.getHost());
+                    setGraphic(null);
+                }
+            }
         }
     }
 }

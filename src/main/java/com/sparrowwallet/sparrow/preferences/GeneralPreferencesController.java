@@ -1,6 +1,7 @@
 package com.sparrowwallet.sparrow.preferences;
 
 import com.sparrowwallet.drongo.BitcoinUnit;
+import com.sparrowwallet.drongo.wallet.Wallet;
 import com.sparrowwallet.sparrow.EventManager;
 import com.sparrowwallet.sparrow.control.UnlabeledToggleSwitch;
 import com.sparrowwallet.sparrow.event.*;
@@ -33,10 +34,16 @@ public class GeneralPreferencesController extends PreferencesDetailController {
     private ComboBox<ExchangeSource> exchangeSource;
 
     @FXML
+    private UnlabeledToggleSwitch loadRecentWallets;
+
+    @FXML
+    private UnlabeledToggleSwitch validateDerivationPaths;
+
+    @FXML
     private UnlabeledToggleSwitch groupByAddress;
 
     @FXML
-    private UnlabeledToggleSwitch includeMempoolChange;
+    private UnlabeledToggleSwitch includeMempoolOutputs;
 
     @FXML
     private UnlabeledToggleSwitch notifyNewTransactions;
@@ -93,13 +100,26 @@ public class GeneralPreferencesController extends PreferencesDetailController {
 
         updateCurrencies(exchangeSource.getSelectionModel().getSelectedItem());
 
+        loadRecentWallets.setSelected(config.isLoadRecentWallets());
+        loadRecentWallets.selectedProperty().addListener((observableValue, oldValue, newValue) -> {
+            config.setLoadRecentWallets(newValue);
+            EventManager.get().post(new RequestOpenWalletsEvent());
+        });
+
+        validateDerivationPaths.setSelected(config.isValidateDerivationPaths());
+        validateDerivationPaths.selectedProperty().addListener((observableValue, oldValue, newValue) -> {
+            config.setValidateDerivationPaths(newValue);
+            System.setProperty(Wallet.ALLOW_DERIVATIONS_MATCHING_OTHER_SCRIPT_TYPES_PROPERTY, Boolean.toString(!newValue));
+        });
+
         groupByAddress.setSelected(config.isGroupByAddress());
-        includeMempoolChange.setSelected(config.isIncludeMempoolChange());
+        includeMempoolOutputs.setSelected(config.isIncludeMempoolOutputs());
         groupByAddress.selectedProperty().addListener((observableValue, oldValue, newValue) -> {
             config.setGroupByAddress(newValue);
         });
-        includeMempoolChange.selectedProperty().addListener((observableValue, oldValue, newValue) -> {
-            config.setIncludeMempoolChange(newValue);
+        includeMempoolOutputs.selectedProperty().addListener((observableValue, oldValue, newValue) -> {
+            config.setIncludeMempoolOutputs(newValue);
+            EventManager.get().post(new IncludeMempoolOutputsChangedEvent());
         });
 
         notifyNewTransactions.setSelected(config.isNotifyNewTransactions());

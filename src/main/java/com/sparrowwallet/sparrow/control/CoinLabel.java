@@ -1,23 +1,18 @@
 package com.sparrowwallet.sparrow.control;
 
 import com.sparrowwallet.drongo.BitcoinUnit;
-import com.sparrowwallet.drongo.protocol.Transaction;
+import com.sparrowwallet.sparrow.UnitFormat;
 import com.sparrowwallet.sparrow.io.Config;
 import javafx.beans.property.LongProperty;
 import javafx.beans.property.SimpleLongProperty;
 import javafx.scene.control.ContextMenu;
+import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.Tooltip;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 
-import java.text.DecimalFormat;
-import java.text.DecimalFormatSymbols;
-import java.util.Locale;
-
-public class CoinLabel extends CopyableLabel {
-    public static final DecimalFormat BTC_FORMAT = new DecimalFormat("0", DecimalFormatSymbols.getInstance(Locale.ENGLISH));
-
+public class CoinLabel extends Label {
     private final LongProperty valueProperty = new SimpleLongProperty(-1);
     private final Tooltip tooltip;
     private final CoinContextMenu contextMenu;
@@ -28,7 +23,6 @@ public class CoinLabel extends CopyableLabel {
 
     public CoinLabel(String text) {
         super(text);
-        BTC_FORMAT.setMaximumFractionDigits(8);
         valueProperty().addListener((observable, oldValue, newValue) -> setValueAsText((Long)newValue, Config.get().getBitcoinUnit()));
         tooltip = new Tooltip();
         contextMenu = new CoinContextMenu();
@@ -58,8 +52,9 @@ public class CoinLabel extends CopyableLabel {
         setTooltip(tooltip);
         setContextMenu(contextMenu);
 
-        String satsValue = String.format(Locale.ENGLISH, "%,d", value) + " gros";
-        String btcValue = BTC_FORMAT.format(value.doubleValue() / Transaction.SATOSHIS_PER_BITCOIN) + " GRS";
+        UnitFormat format = Config.get().getUnitFormat() == null ? UnitFormat.DOT : Config.get().getUnitFormat();
+        String satsValue = format.formatSatsValue(value) + " gros";
+        String btcValue = format.formatBtcValue(value) + " GRS";
 
         BitcoinUnit unit = bitcoinUnit;
         if(unit == null || unit.equals(BitcoinUnit.AUTO)) {
@@ -77,7 +72,7 @@ public class CoinLabel extends CopyableLabel {
 
     private class CoinContextMenu extends ContextMenu {
         public CoinContextMenu() {
-            MenuItem copySatsValue = new MenuItem("Copy Value in Satoshis");
+            MenuItem copySatsValue = new MenuItem("Copy Value in sats");
             copySatsValue.setOnAction(AE -> {
                 hide();
                 ClipboardContent content = new ClipboardContent();
@@ -89,16 +84,12 @@ public class CoinLabel extends CopyableLabel {
             copyBtcValue.setOnAction(AE -> {
                 hide();
                 ClipboardContent content = new ClipboardContent();
-                content.putString(BTC_FORMAT.format((double)getValue() / Transaction.SATOSHIS_PER_BITCOIN));
+                UnitFormat format = Config.get().getUnitFormat() == null ? UnitFormat.DOT : Config.get().getUnitFormat();
+                content.putString(format.formatBtcValue(getValue()));
                 Clipboard.getSystemClipboard().setContent(content);
             });
 
             getItems().addAll(copySatsValue, copyBtcValue);
         }
-    }
-
-    public static DecimalFormat getBTCFormat() {
-        BTC_FORMAT.setMaximumFractionDigits(8);
-        return BTC_FORMAT;
     }
 }

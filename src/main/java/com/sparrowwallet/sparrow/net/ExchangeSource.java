@@ -1,9 +1,8 @@
 package com.sparrowwallet.sparrow.net;
 
-import com.google.common.net.HostAndPort;
 import com.google.gson.Gson;
+import com.sparrowwallet.sparrow.AppServices;
 import com.sparrowwallet.sparrow.event.ExchangeRatesUpdatedEvent;
-import com.sparrowwallet.sparrow.io.Config;
 import javafx.concurrent.ScheduledService;
 import javafx.concurrent.Service;
 import javafx.concurrent.Task;
@@ -13,7 +12,6 @@ import org.slf4j.LoggerFactory;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
-import java.net.InetSocketAddress;
 import java.net.Proxy;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -35,8 +33,8 @@ public enum ExchangeSource {
     COINBASE("Coinbase") {
         @Override
         public List<Currency> getSupportedCurrencies() {
-            return getRates().data.rates.keySet().stream().filter(code -> isValidISO4217Code(code.toUpperCase()))
-                    .map(code -> Currency.getInstance(code.toUpperCase())).collect(Collectors.toList());
+            return getRates().data.rates.keySet().stream().filter(code -> isValidISO4217Code(code.toUpperCase(Locale.ROOT)))
+                    .map(code -> Currency.getInstance(code.toUpperCase(Locale.ROOT))).collect(Collectors.toList());
         }
 
         @Override
@@ -52,13 +50,21 @@ public enum ExchangeSource {
 
         private CoinbaseRates getRates() {
             String url = "https://api.coinbase.com/v2/exchange-rates?currency=BTC";
-            Proxy proxy = getProxy();
+            Proxy proxy = AppServices.getProxy();
+
+            if(log.isInfoEnabled()) {
+                log.info("Requesting exchange rates from " + url);
+            }
 
             try(InputStream is = (proxy == null ? new URL(url).openStream() : new URL(url).openConnection(proxy).getInputStream()); Reader reader = new InputStreamReader(is, StandardCharsets.UTF_8)) {
                 Gson gson = new Gson();
                 return gson.fromJson(reader, CoinbaseRates.class);
             } catch (Exception e) {
-                log.error("Error retrieving currency rates", e);
+                if(log.isDebugEnabled()) {
+                    log.warn("Error retrieving currency rates", e);
+                } else {
+                    log.warn("Error retrieving currency rates (" + e.getMessage() + ")");
+                }
                 return new CoinbaseRates();
             }
         }
@@ -82,16 +88,23 @@ public enum ExchangeSource {
             return null;
         }
 
-        private CoinGeckoData getRates() {
-            String url = "https://api.coingecko.com/api/v3/coins/groestlcoin?tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false";
-            Proxy proxy = getProxy();
+        private CoinGeckoRates getRates() {
+            String url = "https://api.coingecko.com/api/v3/exchange_rates";
+            Proxy proxy = AppServices.getProxy();
+
+            if(log.isInfoEnabled()) {
+                log.info("Requesting exchange rates from " + url);
+            }
 
             try(InputStream is = (proxy == null ? new URL(url).openStream() : new URL(url).openConnection(proxy).getInputStream()); Reader reader = new InputStreamReader(is, StandardCharsets.UTF_8)) {
                 Gson gson = new Gson();
-                return gson.fromJson(reader, CoinGeckoData.class);
+                return gson.fromJson(reader, CoinGeckoRates.class);
             } catch (Exception e) {
-                log.error("Error retrieving currency rates", e);
-                return new CoinGeckoData();
+                if(log.isDebugEnabled()) {
+                    log.warn("Error retrieving currency rates", e);
+                } else {
+                    log.warn("Error retrieving currency rates (" + e.getMessage() + ")");
+                }                return new CoinGeckoRates();
             }
         }
     };
@@ -115,17 +128,6 @@ public enum ExchangeSource {
         } catch (IllegalArgumentException e) {
             return false;
         }
-    }
-
-    private static Proxy getProxy() {
-        Config config = Config.get();
-        if(config.isUseProxy()) {
-            HostAndPort proxy = HostAndPort.fromString(config.getProxyServer());
-            InetSocketAddress proxyAddress = new InetSocketAddress(proxy.getHost(), proxy.getPortOrDefault(ProxyTcpOverTlsTransport.DEFAULT_PROXY_PORT));
-            return new Proxy(Proxy.Type.SOCKS, proxyAddress);
-        }
-
-        return null;
     }
 
     @Override

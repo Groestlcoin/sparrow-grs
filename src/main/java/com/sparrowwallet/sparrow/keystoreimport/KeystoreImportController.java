@@ -1,7 +1,9 @@
 package com.sparrowwallet.sparrow.keystoreimport;
 
+import com.sparrowwallet.drongo.KeyDerivation;
 import com.sparrowwallet.drongo.wallet.KeystoreSource;
 import com.sparrowwallet.drongo.wallet.Wallet;
+import com.sparrowwallet.drongo.wallet.WalletModel;
 import com.sparrowwallet.sparrow.AppServices;
 import com.sparrowwallet.sparrow.io.Device;
 import javafx.application.Platform;
@@ -10,12 +12,14 @@ import javafx.fxml.FXMLLoader;
 import javafx.fxml.Initializable;
 import javafx.scene.Node;
 import javafx.scene.control.Toggle;
+import javafx.scene.control.ToggleButton;
 import javafx.scene.control.ToggleGroup;
 import javafx.scene.layout.StackPane;
 
 import java.io.IOException;
 import java.net.URL;
 import java.util.List;
+import java.util.Locale;
 import java.util.ResourceBundle;
 
 public class KeystoreImportController implements Initializable {
@@ -26,6 +30,9 @@ public class KeystoreImportController implements Initializable {
 
     @FXML
     private StackPane importPane;
+
+    private KeyDerivation requiredDerivation;
+    private WalletModel requiredModel;
 
     @Override
     public void initialize(URL location, ResourceBundle resources) {
@@ -45,7 +52,7 @@ public class KeystoreImportController implements Initializable {
             }
 
             KeystoreSource importType = (KeystoreSource) selectedToggle.getUserData();
-            String fxmlName = importType.toString().toLowerCase();
+            String fxmlName = importType.toString().toLowerCase(Locale.ROOT);
             if(importType == KeystoreSource.SW_SEED || importType == KeystoreSource.SW_WATCH) {
                 fxmlName = "sw";
             }
@@ -53,11 +60,12 @@ public class KeystoreImportController implements Initializable {
         });
     }
 
-    public void selectSource(KeystoreSource keystoreSource) {
+    public void selectSource(KeystoreSource keystoreSource, boolean required) {
         for(Toggle toggle : importMenu.getToggles()) {
             if(toggle.getUserData().equals(keystoreSource)) {
                 Platform.runLater(() -> importMenu.selectToggle(toggle));
-                return;
+            } else if(required) {
+                ((ToggleButton)toggle).setDisable(true);
             }
         }
     }
@@ -84,7 +92,12 @@ public class KeystoreImportController implements Initializable {
         importPane.getChildren().removeAll(importPane.getChildren());
 
         try {
-            FXMLLoader importLoader = new FXMLLoader(AppServices.class.getResource("keystoreimport/" + fxmlName + ".fxml"));
+            URL url = AppServices.class.getResource("keystoreimport/" + fxmlName + ".fxml");
+            if(url == null) {
+                throw new IllegalStateException("Cannot find keystoreimport/" + fxmlName + ".fxml");
+            }
+
+            FXMLLoader importLoader = new FXMLLoader(url);
             Node importTypeNode = importLoader.load();
             KeystoreImportDetailController controller = importLoader.getController();
             controller.setMasterController(this);
@@ -95,5 +108,21 @@ public class KeystoreImportController implements Initializable {
         } catch (IOException e) {
             throw new IllegalStateException("Can't find pane", e);
         }
+    }
+
+    public KeyDerivation getRequiredDerivation() {
+        return requiredDerivation;
+    }
+
+    public void setRequiredDerivation(KeyDerivation requiredDerivation) {
+        this.requiredDerivation = requiredDerivation;
+    }
+
+    public WalletModel getRequiredModel() {
+        return requiredModel;
+    }
+
+    public void setRequiredModel(WalletModel requiredModel) {
+        this.requiredModel = requiredModel;
     }
 }

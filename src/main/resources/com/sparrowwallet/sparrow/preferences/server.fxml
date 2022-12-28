@@ -16,6 +16,9 @@
 <?import com.sparrowwallet.sparrow.net.ServerType?>
 <?import com.sparrowwallet.sparrow.net.CoreAuthType?>
 <?import com.sparrowwallet.sparrow.control.HelpLabel?>
+<?import com.sparrowwallet.sparrow.control.CopyableLabel?>
+<?import com.sparrowwallet.sparrow.control.ComboBoxTextField?>
+
 <GridPane hgap="10.0" vgap="10.0" stylesheets="@preferences.css, @../general.css" xmlns="http://javafx.com/javafx/10.0.2-internal" xmlns:fx="http://javafx.com/fxml/1" fx:controller="com.sparrowwallet.sparrow.preferences.ServerPreferencesController">
     <padding>
         <Insets left="25.0" right="25.0" top="25.0" />
@@ -30,17 +33,31 @@
     <Form GridPane.columnIndex="0" GridPane.rowIndex="0">
         <Fieldset inputGrow="SOMETIMES" text="Server">
             <Field text="Type:">
-                <SegmentedButton>
+                <SegmentedButton fx:id="serverTypeSegmentedButton">
                     <toggleGroup>
                         <ToggleGroup fx:id="serverTypeToggleGroup" />
                     </toggleGroup>
                     <buttons>
-                        <!--ToggleButton text="Groestlcoin Core" toggleGroup="$serverTypeToggleGroup">
+                        <ToggleButton fx:id="publicElectrumToggle" text="Public Server" toggleGroup="$serverTypeToggleGroup">
+                            <graphic>
+                                <Glyph fontFamily="Font Awesome 5 Free Solid" fontSize="12" icon="TOGGLE_ON" styleClass="public-electrum" />
+                            </graphic>
+                            <userData>
+                                <ServerType fx:constant="PUBLIC_ELECTRUM_SERVER"/>
+                            </userData>
+                        </ToggleButton>
+                        <ToggleButton text="Groestlcoin Core" toggleGroup="$serverTypeToggleGroup">
+                            <graphic>
+                                <Glyph fontFamily="Font Awesome 5 Free Solid" fontSize="12" icon="TOGGLE_ON" styleClass="bitcoin-core" />
+                            </graphic>
                             <userData>
                                 <ServerType fx:constant="BITCOIN_CORE"/>
                             </userData>
-                        </ToggleButton-->
-                        <ToggleButton text="Electrum-GRS Server" toggleGroup="$serverTypeToggleGroup" selected="true">
+                        </ToggleButton>
+                        <ToggleButton text="Private Electrum" toggleGroup="$serverTypeToggleGroup">
+                            <graphic>
+                                <Glyph fontFamily="Font Awesome 5 Free Solid" fontSize="12" icon="TOGGLE_ON" styleClass="private-electrum" />
+                            </graphic>
                             <userData>
                                 <ServerType fx:constant="ELECTRUM_SERVER"/>
                             </userData>
@@ -51,11 +68,43 @@
         </Fieldset>
     </Form>
 
+    <Form fx:id="publicElectrumForm" GridPane.columnIndex="0" GridPane.rowIndex="1">
+        <Fieldset inputGrow="SOMETIMES" text="Public Server">
+            <Field text="">
+                <Label alignment="CENTER" translateY="-1">
+                    <graphic>
+                        <Glyph fontFamily="Font Awesome 5 Free Solid" fontSize="12" icon="EXCLAMATION_TRIANGLE" styleClass="public-warning" />
+                    </graphic>
+                    <padding>
+                        <Insets right="5" />
+                    </padding>
+                </Label>
+                <CopyableLabel text="Warning!" />
+            </Field>
+            <Field text="">
+                <CopyableLabel text="Using a public server means it can see your transactions."/>
+            </Field>
+            <Field text="URL:">
+                <ComboBox fx:id="publicElectrumServer" />
+            </Field>
+            <Field text="Use Proxy:">
+                <UnlabeledToggleSwitch fx:id="publicUseProxy"/>
+            </Field>
+            <Field text="Proxy URL:">
+                <TextField fx:id="publicProxyHost" promptText="e.g. 127.0.0.1" />
+                <TextField fx:id="publicProxyPort" maxWidth="120" promptText="e.g. 9050/9150" />
+            </Field>
+        </Fieldset>
+    </Form>
+
     <Form fx:id="coreForm" GridPane.columnIndex="0" GridPane.rowIndex="1">
         <Fieldset inputGrow="SOMETIMES" text="Groestlcoin Core RPC">
             <Field text="URL:">
-                <TextField fx:id="coreHost" promptText="e.g. 127.0.0.1"/>
-                <TextField fx:id="corePort" promptText="e.g. 1441" prefWidth="80" />
+                <StackPane>
+                    <ComboBox fx:id="recentCoreServers" />
+                    <ComboBoxTextField fx:id="coreHost" promptText="e.g. 127.0.0.1" comboProperty="$recentCoreServers" />
+                </StackPane>
+                <TextField fx:id="corePort" promptText="e.g. 1441" maxWidth="120" />
             </Field>
             <Field text="Authentication:">
                 <SegmentedButton>
@@ -88,20 +137,24 @@
                 <TextField fx:id="coreUser"/>
                 <PasswordField fx:id="corePass"/>
             </Field>
-            <Field text="Multi-Wallet:">
-                <UnlabeledToggleSwitch fx:id="coreMultiWallet"/> <HelpLabel helpText="Creates a new Groestlcoin Core wallet with the following name (recommended to avoid conflicts)" />
+            <Field text="Use Proxy:">
+                <UnlabeledToggleSwitch fx:id="coreUseProxy"/><HelpLabel helpText="Groestlcoin Core RPC onion URLs, and all other non-RPC external addresses will be connected via this proxy if configured." />
             </Field>
-            <Field text="Wallet Name:" styleClass="label-button">
-                <TextField fx:id="coreWallet"/>
+            <Field text="Proxy URL:">
+                <TextField fx:id="coreProxyHost" promptText="e.g. 127.0.0.1" />
+                <TextField fx:id="coreProxyPort" maxWidth="120" promptText="e.g. 9050/9150" />
             </Field>
         </Fieldset>
     </Form>
 
     <Form fx:id="electrumForm" GridPane.columnIndex="0" GridPane.rowIndex="1">
-        <Fieldset inputGrow="SOMETIMES" text="Electrum-GRS Server">
+        <Fieldset inputGrow="SOMETIMES" text="Private Electrum Server">
             <Field text="URL:">
-                <TextField fx:id="electrumHost" promptText="e.g. electrum1.groestlcoin.org"/>
-                <TextField fx:id="electrumPort" promptText="e.g. 50002" prefWidth="80" />
+                <StackPane>
+                    <ComboBox fx:id="recentElectrumServers" />
+                    <ComboBoxTextField fx:id="electrumHost" promptText="e.g. 127.0.0.1, electrum1.groestlcoin.org or Tor hostname (.onion)" comboProperty="$recentElectrumServers" />
+                </StackPane>
+                <TextField fx:id="electrumPort" promptText="e.g. 50002" maxWidth="120" />
             </Field>
             <Field text="Use SSL:">
                 <UnlabeledToggleSwitch fx:id="electrumUseSsl"/>
@@ -115,11 +168,11 @@
                 </Button>
             </Field>
             <Field text="Use Proxy:">
-                <UnlabeledToggleSwitch fx:id="useProxy"/>
+                <UnlabeledToggleSwitch fx:id="useProxy"/><HelpLabel helpText="All external addresses will be connected via this proxy if configured." />
             </Field>
             <Field text="Proxy URL:">
-                <TextField fx:id="proxyHost" />
-                <TextField fx:id="proxyPort" prefWidth="80" />
+                <TextField fx:id="proxyHost" promptText="e.g. 127.0.0.1" />
+                <TextField fx:id="proxyPort" maxWidth="120" promptText="e.g. 9050/9150" />
             </Field>
         </Fieldset>
     </Form>

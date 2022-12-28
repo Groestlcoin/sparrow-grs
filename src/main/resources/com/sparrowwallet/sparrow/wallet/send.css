@@ -6,7 +6,7 @@
     -fx-pref-height: 40px;
 }
 
-.send-form .form .fieldset:horizontal .label-container {
+.send-form .form .fieldset:horizontal .label-container, .buttonRowLabel {
     -fx-pref-width: 90px;
 }
 
@@ -80,16 +80,20 @@
 
 #transactionDiagram .inputs-type, #transactionDiagram .input-line, #transactionDiagram .output-line {
     -fx-fill: transparent;
-    -fx-text-fill: #696c77;
-    -fx-stroke: #696c77;
+    -fx-text-fill: -fx-text-background-color;
+    -fx-stroke: -fx-text-background-color;
     -fx-stroke-width: 1px;
+}
+
+#transactionDiagram .size-indicator {
+    -fx-fill: -fx-text-background-color;
 }
 
 #transactionDiagram .input-dashed-line {
     -fx-stroke-dash-array: 5px 5px;
 }
 
-#transactionDiagram .utxo-label .button {
+#transactionDiagram .utxo-label .button, #transactionDiagram .replace-change-label .button {
     -fx-padding: 0;
     -fx-pref-height: 18;
     -fx-pref-width: 18;
@@ -103,4 +107,27 @@
 
 #transactionDiagram .utxo-label:hover .button .label .text {
     -fx-fill: -fx-text-base-color;
+}
+
+#transactionDiagram .change-warning-icon {
+    -fx-text-fill: rgb(238, 210, 2);
+}
+
+#targetBlocks .track {
+    -fx-background-color: -fx-shadow-highlight-color,
+        linear-gradient(to bottom, derive(-fx-text-box-border, -10%), -fx-text-box-border),
+        linear-gradient(to bottom, derive(-fx-control-inner-background, -9%), derive(-fx-control-inner-background, 0%), derive(-fx-control-inner-background, -5%), derive(-fx-control-inner-background, -12%)),
+        linear-gradient(to right, #c8416466 0%, #a0a1a766 50%, #a0a1a700 100%);
+}
+
+#transactionDiagram .coins-icon, #transactionDiagram .user-icon {
+    -fx-text-fill: -fx-text-background-color;
+}
+
+#transactionDiagram .coins-replace-icon, #transactionDiagram .question-icon {
+    -fx-text-fill: -fx-accent;
+}
+
+#transactionDiagram .useradd-icon {
+    -fx-text-fill: -fx-accent;
 }

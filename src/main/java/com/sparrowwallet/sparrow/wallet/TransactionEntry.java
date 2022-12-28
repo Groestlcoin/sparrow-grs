@@ -2,14 +2,17 @@ package com.sparrowwallet.sparrow.wallet;
 
 import com.google.common.eventbus.Subscribe;
 import com.sparrowwallet.drongo.KeyPurpose;
+import com.sparrowwallet.drongo.protocol.HashIndex;
 import com.sparrowwallet.drongo.protocol.TransactionInput;
 import com.sparrowwallet.drongo.protocol.TransactionOutput;
 import com.sparrowwallet.drongo.wallet.*;
+import com.sparrowwallet.sparrow.AppServices;
 import com.sparrowwallet.sparrow.EventManager;
 import com.sparrowwallet.sparrow.WalletTabData;
 import com.sparrowwallet.sparrow.event.WalletBlockHeightChangedEvent;
-import com.sparrowwallet.sparrow.event.WalletEntryLabelChangedEvent;
+import com.sparrowwallet.sparrow.event.WalletEntryLabelsChangedEvent;
 import com.sparrowwallet.sparrow.event.WalletTabsClosedEvent;
+import com.sparrowwallet.sparrow.net.MempoolRateSize;
 import javafx.beans.property.IntegerProperty;
 import javafx.beans.property.IntegerPropertyBase;
 import javafx.beans.property.LongProperty;
@@ -26,15 +29,28 @@ public class TransactionEntry extends Entry implements Comparable<TransactionEnt
     private final BlockTransaction blockTransaction;
 
     public TransactionEntry(Wallet wallet, BlockTransaction blockTransaction, Map<BlockTransactionHashIndex, KeyPurpose> inputs, Map<BlockTransactionHashIndex, KeyPurpose> outputs) {
-        super(wallet, blockTransaction.getLabel(), createChildEntries(wallet, inputs, outputs));
+        super(wallet.isNested() ? wallet.getMasterWallet() : wallet, blockTransaction.getLabel(), createChildEntries(wallet, inputs, outputs));
         this.blockTransaction = blockTransaction;
 
         labelProperty().addListener((observable, oldValue, newValue) -> {
-            blockTransaction.setLabel(newValue);
-            EventManager.get().post(new WalletEntryLabelChangedEvent(wallet, this));
+            if(!Objects.equals(blockTransaction.getLabel(), newValue)) {
+                blockTransaction.setLabel(newValue);
+                EventManager.get().post(new WalletEntryLabelsChangedEvent(wallet, this));
+            }
         });
 
-        setConfirmations(calculateConfirmations());
+        confirmations = new IntegerPropertyBase(calculateConfirmations()) {
+            @Override
+            public Object getBean() {
+                return TransactionEntry.this;
+            }
+
+            @Override
+            public String getName() {
+                return "confirmations";
+            }
+        };
+
         if(isFullyConfirming()) {
             EventManager.get().register(this);
         }
@@ -59,6 +75,16 @@ public class TransactionEntry extends Entry implements Comparable<TransactionEnt
         return value;
     }
 
+    @Override
+    public String getEntryType() {
+        return "Transaction";
+    }
+
+    @Override
+    public Function getWalletFunction() {
+        return Function.TRANSACTIONS;
+    }
+
     public boolean isConfirming() {
         return getConfirmations() < BlockTransactionHash.BLOCKS_TO_CONFIRM;
     }
@@ -68,46 +94,34 @@ public class TransactionEntry extends Entry implements Comparable<TransactionEnt
     }
 
     public int calculateConfirmations() {
-        return blockTransaction.getConfirmations(getWallet().getStoredBlockHeight());
+        return blockTransaction.getConfirmations(AppServices.getCurrentBlockHeight() == null ? getWallet().getStoredBlockHeight() : AppServices.getCurrentBlockHeight());
     }
 
-    public String getConfirmationsDescription() {
-        int confirmations = getConfirmations();
-        if(confirmations == 0) {
-            return "Unconfirmed in mempool";
-        } else if(confirmations < BlockTransactionHash.BLOCKS_TO_FULLY_CONFIRM) {
-            return confirmations + " confirmation" + (confirmations == 1 ? "" : "s");
-        } else {
-            return BlockTransactionHash.BLOCKS_TO_FULLY_CONFIRM + "+ confirmations";
-        }
-    }
-
-    public boolean isComplete() {
+    public boolean isComplete(Map<HashIndex, BlockTransactionHashIndex> walletTxos) {
         int validEntries = 0;
-        Map<BlockTransactionHashIndex, WalletNode> walletTxos = getWallet().getWalletTxos();
         for(TransactionInput txInput : blockTransaction.getTransaction().getInputs()) {
-            Optional<BlockTransactionHashIndex> optRef = walletTxos.keySet().stream().filter(ref -> ref.getHash().equals(txInput.getOutpoint().getHash()) && ref.getIndex() == txInput.getOutpoint().getIndex()).findFirst();
-            if(optRef.isPresent()) {
+            BlockTransactionHashIndex ref = walletTxos.get(new HashIndex(txInput.getOutpoint().getHash(), txInput.getOutpoint().getIndex()));
+            if(ref != null) {
                 validEntries++;
-                if(getChildren().stream().noneMatch(entry -> ((HashIndexEntry)entry).getHashIndex().equals(optRef.get().getSpentBy()) && ((HashIndexEntry)entry).getType().equals(HashIndexEntry.Type.INPUT))) {
-                    log.warn("TransactionEntry " + blockTransaction.getHash() + " for wallet " + getWallet().getName() + " missing child for input " + optRef.get().getSpentBy() + " on output " + optRef.get());
+                if(getChildren().stream().noneMatch(entry -> ((HashIndexEntry)entry).getHashIndex().toString().equals(ref.getSpentBy().toString()) && ((HashIndexEntry)entry).getType().equals(HashIndexEntry.Type.INPUT))) {
+                    log.warn("TransactionEntry " + blockTransaction.getHash() + " for wallet " + getWallet().getFullName() + " missing child for input " + ref.getSpentBy() + " on output " + ref);
                     return false;
                 }
             }
         }
         for(TransactionOutput txOutput : blockTransaction.getTransaction().getOutputs()) {
-            Optional<BlockTransactionHashIndex> optRef = walletTxos.keySet().stream().filter(ref -> ref.getHash().equals(txOutput.getHash()) && ref.getIndex() == txOutput.getIndex()).findFirst();
-            if(optRef.isPresent()) {
+            BlockTransactionHashIndex ref = walletTxos.get(new HashIndex(txOutput.getHash(), txOutput.getIndex()));
+            if(ref != null) {
                 validEntries++;
-                if(getChildren().stream().noneMatch(entry -> ((HashIndexEntry)entry).getHashIndex().equals(optRef.get()) && ((HashIndexEntry)entry).getType().equals(HashIndexEntry.Type.OUTPUT))) {
-                    log.warn("TransactionEntry " + blockTransaction.getHash() + " for wallet " + getWallet().getName() + " missing child for output " + optRef.get());
+                if(getChildren().stream().noneMatch(entry -> ((HashIndexEntry)entry).getHashIndex().toString().equals(ref.toString()) && ((HashIndexEntry)entry).getType().equals(HashIndexEntry.Type.OUTPUT))) {
+                    log.warn("TransactionEntry " + blockTransaction.getHash() + " for wallet " + getWallet().getFullName() + " missing child for output " + ref);
                     return false;
                 }
             }
         }
 
         if(getChildren().size() != validEntries) {
-            log.warn("TransactionEntry " + blockTransaction.getHash() + " for wallet " + getWallet().getName() + " has incorrect number of children " + getChildren().size() + " (should be " + validEntries + ")");
+            log.warn("TransactionEntry " + blockTransaction.getHash() + " for wallet " + getWallet().getFullName() + " has incorrect number of children " + getChildren().size() + " (should be " + validEntries + ")");
             return false;
         }
 
@@ -145,7 +159,9 @@ public class TransactionEntry extends Entry implements Comparable<TransactionEnt
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         TransactionEntry that = (TransactionEntry) o;
-        return getWallet().equals(that.getWallet()) && blockTransaction.equals(that.blockTransaction);
+        //Note we check children count only if both are non-zero because we need to match TransactionEntry objects without children for WalletEntryLabelsChangedEvent
+        return super.equals(that) && blockTransaction.equals(that.blockTransaction)
+                && (getChildren().isEmpty() || that.getChildren().isEmpty() || getChildren().size() == that.getChildren().size());
     }
 
     @Override
@@ -155,39 +171,36 @@ public class TransactionEntry extends Entry implements Comparable<TransactionEnt
 
     @Override
     public int compareTo(TransactionEntry other) {
-        return blockTransaction.compareTo(other.blockTransaction);
+        //This comparison must be identical to that of WalletTransactionsEntry.WalletTransaction
+        if(blockTransaction.getHeight() != other.blockTransaction.getHeight()) {
+            int blockOrder = blockTransaction.getComparisonHeight() - other.blockTransaction.getComparisonHeight();
+            if(blockOrder != 0) {
+                return blockOrder;
+            }
+        }
+
+        int valueOrder = Long.compare(other.getValue(), getValue());
+        if(valueOrder != 0) {
+            return valueOrder;
+        }
+
+        return blockTransaction.getHash().compareTo(other.blockTransaction.getHash());
     }
 
     /**
      * Defines the number of confirmations
      */
-    private IntegerProperty confirmations;
+    private final IntegerProperty confirmations;
 
     public final void setConfirmations(int value) {
-        if(confirmations != null || value != 0) {
-            confirmationsProperty().set(value);
-        }
+        confirmations.set(value);
     }
 
     public final int getConfirmations() {
-        return confirmations == null ? 0 : confirmations.get();
+        return confirmations.get();
     }
 
     public final IntegerProperty confirmationsProperty() {
-        if(confirmations == null) {
-            confirmations = new IntegerPropertyBase(0) {
-
-                @Override
-                public Object getBean() {
-                    return TransactionEntry.this;
-                }
-
-                @Override
-                public String getName() {
-                    return "confirmations";
-                }
-            };
-        }
         return confirmations;
     }
 
@@ -224,9 +237,19 @@ public class TransactionEntry extends Entry implements Comparable<TransactionEnt
         return balance;
     }
 
+    public Long getVSizeFromTip() {
+        if(!AppServices.getMempoolHistogram().isEmpty()) {
+            Set<MempoolRateSize> rateSizes = AppServices.getMempoolHistogram().get(AppServices.getMempoolHistogram().lastKey());
+            double feeRate = blockTransaction.getFeeRate();
+            return rateSizes.stream().filter(rateSize -> rateSize.getFee() > feeRate).mapToLong(MempoolRateSize::getVSize).sum();
+        }
+
+        return null;
+    }
+
     @Subscribe
     public void blockHeightChanged(WalletBlockHeightChangedEvent event) {
-        if(getWallet().equals(event.getWallet())) {
+        if(event.getWallet().equals(getWallet())) {
             setConfirmations(calculateConfirmations());
 
             if(!isFullyConfirming()) {

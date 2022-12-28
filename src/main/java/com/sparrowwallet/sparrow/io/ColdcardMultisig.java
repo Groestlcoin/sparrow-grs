@@ -11,14 +11,19 @@ import com.sparrowwallet.drongo.wallet.Keystore;
 import com.sparrowwallet.drongo.wallet.KeystoreSource;
 import com.sparrowwallet.drongo.wallet.Wallet;
 import com.sparrowwallet.drongo.wallet.WalletModel;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 public class ColdcardMultisig implements WalletImport, KeystoreFileImport, WalletExport {
+    private static final Logger log = LoggerFactory.getLogger(ColdcardMultisig.class);
+
     @Override
     public String getName() {
         return "Coldcard Multisig";
@@ -32,29 +37,33 @@ public class ColdcardMultisig implements WalletImport, KeystoreFileImport, Walle
     @Override
     public Keystore getKeystore(ScriptType scriptType, InputStream inputStream, String password) throws ImportException {
         InputStreamReader reader = new InputStreamReader(inputStream, StandardCharsets.UTF_8);
-        ColdcardKeystore cck = Storage.getGson().fromJson(reader, ColdcardKeystore.class);
+        ColdcardKeystore cck = JsonPersistence.getGson().fromJson(reader, ColdcardKeystore.class);
 
         Keystore keystore = new Keystore("Coldcard");
         keystore.setSource(KeystoreSource.HW_AIRGAPPED);
         keystore.setWalletModel(WalletModel.COLDCARD);
 
-        if(cck.xpub != null && cck.path != null) {
-            ExtendedKey.Header header = ExtendedKey.Header.fromExtendedKey(cck.xpub);
-            if(header.getDefaultScriptType() != scriptType) {
-                throw new ImportException("This wallet's script type (" + scriptType + ") does not match the " + getName() + " script type (" + header.getDefaultScriptType() + ")");
+        try {
+            if(cck.xpub != null && cck.path != null) {
+                ExtendedKey.Header header = ExtendedKey.Header.fromExtendedKey(cck.xpub);
+                if(header.getDefaultScriptType() != scriptType) {
+                    throw new ImportException("This wallet's script type (" + scriptType + ") does not match the " + getName() + " script type (" + header.getDefaultScriptType() + ")");
+                }
+                keystore.setKeyDerivation(new KeyDerivation(cck.xfp, cck.path));
+                keystore.setExtendedPublicKey(ExtendedKey.fromDescriptor(cck.xpub));
+            } else if(scriptType.equals(ScriptType.P2SH)) {
+                keystore.setKeyDerivation(new KeyDerivation(cck.xfp, cck.p2sh_deriv));
+                keystore.setExtendedPublicKey(ExtendedKey.fromDescriptor(cck.p2sh));
+            } else if(scriptType.equals(ScriptType.P2SH_P2WSH)) {
+                keystore.setKeyDerivation(new KeyDerivation(cck.xfp, cck.p2wsh_p2sh_deriv != null ? cck.p2wsh_p2sh_deriv : cck.p2sh_p2wsh_deriv));
+                keystore.setExtendedPublicKey(ExtendedKey.fromDescriptor(cck.p2wsh_p2sh != null ? cck.p2wsh_p2sh : cck.p2sh_p2wsh));
+            } else if(scriptType.equals(ScriptType.P2WSH)) {
+                keystore.setKeyDerivation(new KeyDerivation(cck.xfp, cck.p2wsh_deriv));
+                keystore.setExtendedPublicKey(ExtendedKey.fromDescriptor(cck.p2wsh));
+            } else {
+                throw new ImportException("Correct derivation not found for script type: " + scriptType);
             }
-            keystore.setKeyDerivation(new KeyDerivation(cck.xfp, cck.path));
-            keystore.setExtendedPublicKey(ExtendedKey.fromDescriptor(cck.xpub));
-        } else if(scriptType.equals(ScriptType.P2SH)) {
-            keystore.setKeyDerivation(new KeyDerivation(cck.xfp, cck.p2sh_deriv));
-            keystore.setExtendedPublicKey(ExtendedKey.fromDescriptor(cck.p2sh));
-        } else if(scriptType.equals(ScriptType.P2SH_P2WSH)) {
-            keystore.setKeyDerivation(new KeyDerivation(cck.xfp, cck.p2wsh_p2sh_deriv != null ? cck.p2wsh_p2sh_deriv : cck.p2sh_p2wsh_deriv));
-            keystore.setExtendedPublicKey(ExtendedKey.fromDescriptor(cck.p2wsh_p2sh != null ? cck.p2wsh_p2sh : cck.p2sh_p2wsh));
-        } else if(scriptType.equals(ScriptType.P2WSH)) {
-            keystore.setKeyDerivation(new KeyDerivation(cck.xfp, cck.p2wsh_deriv));
-            keystore.setExtendedPublicKey(ExtendedKey.fromDescriptor(cck.p2wsh));
-        } else {
+        } catch(NullPointerException e) {
             throw new ImportException("Correct derivation not found for script type: " + scriptType);
         }
 
@@ -76,12 +85,12 @@ public class ColdcardMultisig implements WalletImport, KeystoreFileImport, Walle
     }
 
     @Override
-    public String getKeystoreImportDescription() {
-        return "Import file created by using the Settings > Multisig Wallets > Export XPUB feature on your Coldcard.";
+    public String getKeystoreImportDescription(int account) {
+        return "Import file created by using the Settings > Multisig Wallets > Export XPUB > " + account + " feature on your Coldcard.";
     }
 
     @Override
-    public String getExportFileExtension() {
+    public String getExportFileExtension(Wallet wallet) {
         return "txt";
     }
 
@@ -141,12 +150,12 @@ public class ColdcardMultisig implements WalletImport, KeystoreFileImport, Walle
             wallet.setScriptType(scriptType);
 
             if(!wallet.isValid()) {
-                throw new IllegalStateException("This file does not describe a valid wallet. Please use the Settings > Multisig Wallets > Export XPUB feature on your Coldcard.");
+                throw new IllegalStateException("This file does not describe a valid wallet. " + getKeystoreImportDescription());
             }
 
             return wallet;
         } catch(Exception e) {
-            throw new ImportException(e);
+            throw new ImportException("Error importing " + getName() + " wallet", e);
         }
     }
 
@@ -175,10 +184,10 @@ public class ColdcardMultisig implements WalletImport, KeystoreFileImport, Walle
         }
 
         try {
-            BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(outputStream));
+            BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(outputStream, StandardCharsets.UTF_8));
             writer.append("# " + getName() + " setup file (created by Sparrow)\n");
             writer.append("#\n");
-            writer.append("Name: ").append(wallet.getName()).append("\n");
+            writer.append("Name: ").append(wallet.getFullName().length() >= 20 ? (wallet.getDisplayName().length() >= 20 ? wallet.getDisplayName().substring(0, 20) : wallet.getDisplayName()) : wallet.getFullName()).append("\n");
             writer.append("Policy: ").append(Integer.toString(wallet.getDefaultPolicy().getNumSignaturesRequired())).append(" of ").append(Integer.toString(wallet.getKeystores().size())).append("\n");
             if(!multipleDerivations) {
                 writer.append("Derivation: ").append(wallet.getKeystores().get(0).getKeyDerivation().getDerivationPath()).append("\n");
@@ -188,24 +197,24 @@ public class ColdcardMultisig implements WalletImport, KeystoreFileImport, Walle
 
             for(Keystore keystore : wallet.getKeystores()) {
                 if(multipleDerivations) {
-                    writer.append("# derivation: ").append(keystore.getKeyDerivation().getDerivationPath()).append("\n");
+                    writer.append("Derivation: ").append(keystore.getKeyDerivation().getDerivationPath()).append("\n");
                 }
-                writer.append(keystore.getKeyDerivation().getMasterFingerprint().toUpperCase()).append(": ").append(keystore.getExtendedPublicKey().toString()).append("\n");
+                writer.append(keystore.getKeyDerivation().getMasterFingerprint().toUpperCase(Locale.ROOT)).append(": ").append(keystore.getExtendedPublicKey().toString()).append("\n");
                 if(multipleDerivations) {
                     writer.append("\n");
                 }
             }
 
             writer.flush();
-            writer.close();
         } catch(Exception e) {
-            throw new ExportException(e);
+            log.error("Error exporting " + getName() + " wallet", e);
+            throw new ExportException("Error exporting " + getName() + " wallet", e);
         }
     }
 
     @Override
     public String getWalletExportDescription() {
-        return "Export file that can be read by your Coldcard using the Settings > Multisig Wallets > Import from SD feature.";
+        return "Export file that can be read by your Coldcard using the Settings > Multisig Wallets > Import from File feature.";
     }
 
     @Override
@@ -220,6 +229,16 @@ public class ColdcardMultisig implements WalletImport, KeystoreFileImport, Walle
 
     @Override
     public boolean isKeystoreImportScannable() {
+        return false;
+    }
+
+    @Override
+    public boolean isWalletExportScannable() {
+        return false;
+    }
+
+    @Override
+    public boolean walletExportRequiresDecryption() {
         return false;
     }
 }
