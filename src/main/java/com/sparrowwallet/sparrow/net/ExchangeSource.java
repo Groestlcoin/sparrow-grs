@@ -88,7 +88,7 @@ public enum ExchangeSource {
             return null;
         }
 
-        private CoinGeckoRates getRates() {
+        private CoinGeckoData getRates() {
             String url = "https://api.coingecko.com/api/v3/exchange_rates";
             Proxy proxy = AppServices.getProxy();
 
@@ -98,13 +98,13 @@ public enum ExchangeSource {
 
             try(InputStream is = (proxy == null ? new URL(url).openStream() : new URL(url).openConnection(proxy).getInputStream()); Reader reader = new InputStreamReader(is, StandardCharsets.UTF_8)) {
                 Gson gson = new Gson();
-                return gson.fromJson(reader, CoinGeckoRates.class);
+                return gson.fromJson(reader, CoinGeckoData.class);
             } catch (Exception e) {
                 if(log.isDebugEnabled()) {
                     log.warn("Error retrieving currency rates", e);
                 } else {
                     log.warn("Error retrieving currency rates (" + e.getMessage() + ")");
-                }                return new CoinGeckoRates();
+                }                return new CoinGeckoData();
             }
         }
     };
