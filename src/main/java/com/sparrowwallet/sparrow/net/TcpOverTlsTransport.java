@@ -118,8 +118,8 @@ public class TcpOverTlsTransport extends TcpTransport {
 
     protected boolean shouldSaveCertificate() {
         //Avoid saving the certificates for blockstream.info public servers - they change too often and encourage approval complacency
-        if(PublicElectrumServer.BLOCKSTREAM_INFO.getServer().getHost().equals(server.getHost())
-                || PublicElectrumServer.ELECTRUM_BLOCKSTREAM_INFO.getServer().getHost().equals(server.getHost())) {
+        if(PublicElectrumServer.ELECTRUM1_GROESTLCOIN_ORG.getServer().getHost().equals(server.getHost())
+                || PublicElectrumServer.ELECTRUM2_GROESTLCOIN_ORG.getServer().getHost().equals(server.getHost())) {
             return false;
         }
 
