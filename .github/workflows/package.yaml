@@ -47,7 +47,7 @@ jobs:
         if: ${{ runner.os == 'Linux' }}
         uses: actions/upload-artifact@v3
         with:
-          name: Sparrow Build - ${{ runner.os }} Headless
+          name: Sparrow-GRS Build - ${{ runner.os }} Headless
           path: |
             build/jpackage/*
             !build/jpackage/Sparrow/

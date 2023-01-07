@@ -16,7 +16,7 @@ or for those without SSH credentials:
 
 `git clone --recursive https://github.com/sparrowwallet/sparrow.git`
 
-In order to build, Sparrow requires Java 17 or higher to be installed. 
+In order to build, Sparrow requires Java 17 or higher to be installed.
 The release binaries are built with [Eclipse Temurin 18.0.1+10](https://github.com/adoptium/temurin18-binaries/releases/tag/jdk-18.0.1%2B10).
 
 Other packages may also be necessary to build depending on the platform. On Debian/Ubuntu systems:
@@ -36,15 +36,13 @@ When updating to the latest HEAD
 
 The release binaries are reproducible from v1.5.0 onwards (pre codesigning and installer packaging). More detailed [instructions on reproducing the binaries](docs/reproducible.md) are provided.
 
-> Video documentation of your build process uploaded to [bitcoinbinary.org](https://bitcoinbinary.org/) is appreciated. Alternatively check the site if you wish to see if someone else already verified the provided binaries. 
-
 ## Running
 
 If you prefer to run Sparrow directly from source, it can be launched from within the project directory with
 
 `./sparrow`
 
-Java 17 or higher must be installed. 
+Java 17 or higher must be installed.
 
 ## Configuration
 
@@ -95,9 +93,9 @@ Sparrow-GRS is licensed under the Apache 2 software licence.
 
 ## GPG Key
 
-The Sparrow release binaries here and on [sparrowwallet.com](https://sparrowwallet.com/download/) are signed using [craigraw's GPG key](https://keybase.io/craigraw):  
-Fingerprint: D4D0D3202FC06849A257B38DE94618334C674B40  
-64-bit: E946 1833 4C67 4B40
+The Sparrow-GRS release binaries here are signed using [hashengineering's GPG key](https://keybase.io/hashengineering):  
+Fingerprint: 35C20DAE5ECF9A893246724CA615EB0C5CEBDEDE
+64-bit: A615 EB0C 5CEB DEDE
 
 ## Credit
 
