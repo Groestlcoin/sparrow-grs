@@ -41,7 +41,7 @@ public class BitcoindTransport implements Transport {
         try {
             this.bitcoindUrl = new URL(bitcoindServer.getUrl() + "/wallet/" + bitcoindWallet);
         } catch(MalformedURLException e) {
-            log.error("Malformed Bitcoin Core RPC URL", e);
+            log.error("Malformed Groestlcoin Core RPC URL", e);
         }
     }
 
@@ -101,7 +101,7 @@ public class BitcoindTransport implements Transport {
     private String getBitcoindAuthEncoded() throws IOException {
         if(cookieFile != null) {
             if(!cookieFile.exists()) {
-                throw new IOException("Cannot find Bitcoin Core cookie file at " + cookieFile.getAbsolutePath());
+                throw new IOException("Cannot find Groestlcoin Core cookie file at " + cookieFile.getAbsolutePath());
             }
 
             if(cookieFileTimestamp == null || cookieFile.lastModified() != cookieFileTimestamp) {
@@ -110,7 +110,7 @@ public class BitcoindTransport implements Transport {
                     bitcoindAuthEncoded = Base64.getEncoder().encodeToString(userPass.getBytes(StandardCharsets.UTF_8));
                     cookieFileTimestamp = cookieFile.lastModified();
                 } catch(Exception e) {
-                    log.warn("Cannot read Bitcoin Core .cookie file", e);
+                    log.warn("Cannot read Groestlcoin Core .cookie file", e);
                 }
             }
         }

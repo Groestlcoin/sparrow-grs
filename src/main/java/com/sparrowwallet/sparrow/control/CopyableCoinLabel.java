@@ -55,8 +55,8 @@ public class CopyableCoinLabel extends CopyableLabel {
             unitFormat = UnitFormat.DOT;
         }
 
-        String satsValue = unitFormat.formatSatsValue(value) + " sats";
-        String btcValue = unitFormat.formatBtcValue(value) + " BTC";
+        String satsValue = unitFormat.formatSatsValue(value) + " gros";
+        String btcValue = unitFormat.formatBtcValue(value) + " GRS";
 
         BitcoinUnit unit = bitcoinUnit;
         if(unit == null || unit.equals(BitcoinUnit.AUTO)) {
@@ -74,7 +74,7 @@ public class CopyableCoinLabel extends CopyableLabel {
 
     private class CoinContextMenu extends ContextMenu {
         public CoinContextMenu() {
-            MenuItem copySatsValue = new MenuItem("Copy Value in sats");
+            MenuItem copySatsValue = new MenuItem("Copy Value in gros");
             copySatsValue.setOnAction(AE -> {
                 hide();
                 ClipboardContent content = new ClipboardContent();
@@ -82,7 +82,7 @@ public class CopyableCoinLabel extends CopyableLabel {
                 Clipboard.getSystemClipboard().setContent(content);
             });
 
-            MenuItem copyBtcValue = new MenuItem("Copy Value in BTC");
+            MenuItem copyBtcValue = new MenuItem("Copy Value in GRS");
             copyBtcValue.setOnAction(AE -> {
                 hide();
                 ClipboardContent content = new ClipboardContent();

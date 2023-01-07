@@ -74,12 +74,12 @@
                                 </RadioMenuItem>
                                 <RadioMenuItem mnemonicParsing="false" text="GRS" toggleGroup="$bitcoinUnit" onAction="#setBitcoinUnit">
                                     <userData>
-                                        <BitcoinUnit fx:constant="BTC" />
+                                        <BitcoinUnit fx:constant="GRS" />
                                     </userData>
                                 </RadioMenuItem>
                                 <RadioMenuItem mnemonicParsing="false" text="gro" toggleGroup="$bitcoinUnit" onAction="#setBitcoinUnit">
                                     <userData>
-                                        <BitcoinUnit fx:constant="SATOSHIS" />
+                                        <BitcoinUnit fx:constant="GROS" />
                                     </userData>
                                 </RadioMenuItem>
                             </items>
@@ -142,7 +142,7 @@
                 </Menu>
                 <Menu fx:id="helpMenu" mnemonicParsing="false" text="Help">
                     <MenuItem mnemonicParsing="false" text="Show Introduction" onAction="#showIntroduction"/>
-                    <MenuItem mnemonicParsing="false" text="Show Online Documentation" onAction="#showDocumentation"/>
+                    <!-- <MenuItem mnemonicParsing="false" text="Show Online Documentation" onAction="#showDocumentation"/> -->
                     <MenuItem mnemonicParsing="false" text="Show Log File" onAction="#showLogFile"/>
                     <MenuItem mnemonicParsing="false" text="Get Support" onAction="#openSupport"/>
                     <MenuItem mnemonicParsing="false" text="Submit Bug Report" onAction="#submitBugReport"/>

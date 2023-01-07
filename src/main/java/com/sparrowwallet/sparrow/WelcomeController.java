@@ -81,7 +81,7 @@ public class WelcomeController {
             welcomeBox.getStyleClass().clear();
             welcomeBox.getStyleClass().add("bitcoin-core");
             serverToggle.setSelected(true);
-            serverStatus.setText("Connected to Bitcoin Core (demonstration only)");
+            serverStatus.setText("Connected to Groestlcoin Core (demonstration only)");
             return true;
         }
 
@@ -91,7 +91,7 @@ public class WelcomeController {
             welcomeBox.getStyleClass().clear();
             welcomeBox.getStyleClass().add("private-electrum");
             serverToggle.setSelected(true);
-            serverStatus.setText("Connected to a Private Electrum Server (demonstration only)");
+            serverStatus.setText("Connected to a Private Electrum-GRS Server (demonstration only)");
         }
 
         return false;
@@ -128,7 +128,7 @@ public class WelcomeController {
             welcomeBox.getStyleClass().clear();
             welcomeBox.getStyleClass().add("bitcoin-core");
             serverToggle.setSelected(true);
-            serverStatus.setText("Connected to Bitcoin Core (demonstration only)");
+            serverStatus.setText("Connected to Groestlcoin Core (demonstration only)");
             return true;
         }
 

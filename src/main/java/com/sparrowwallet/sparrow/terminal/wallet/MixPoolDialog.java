@@ -148,8 +148,8 @@ public class MixPoolDialog extends WalletDialog {
                     OptionalLong optMinValue = allPoolsService.getValue().stream().mapToLong(pool1 -> pool1.getPremixValueMin() + pool1.getFeeValue()).min();
                     if(optMinValue.isPresent() && totalUtxoValue < optMinValue.getAsLong()) {
                         UnitFormat format = Config.get().getUnitFormat() == null ? UnitFormat.DOT : Config.get().getUnitFormat();
-                        String satsValue = format.formatSatsValue(optMinValue.getAsLong()) + " sats";
-                        String btcValue = format.formatBtcValue(optMinValue.getAsLong()) + " BTC";
+                        String satsValue = format.formatSatsValue(optMinValue.getAsLong()) + " gros";
+                        String btcValue = format.formatBtcValue(optMinValue.getAsLong()) + " GRS";
                         AppServices.showErrorDialog("Insufficient UTXO Value", "No available pools. Select a value over " + (Config.get().getBitcoinUnit() == BitcoinUnit.BTC ? btcValue : satsValue) + ".");
                         SparrowTerminal.get().getGuiThread().invokeLater(this::close);
                     }

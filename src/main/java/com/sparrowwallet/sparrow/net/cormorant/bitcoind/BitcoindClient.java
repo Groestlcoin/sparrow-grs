@@ -91,7 +91,7 @@ public class BitcoindClient {
     public void initialize() throws CormorantBitcoindException {
         networkInfo = getBitcoindService().getNetworkInfo();
         if(networkInfo.version() < 240000) {
-            throw new CormorantBitcoindException("Bitcoin Core versions older than v24 are not supported");
+            throw new CormorantBitcoindException("Groestlcoin Core versions older than v24 are not supported");
         }
 
         BlockchainInfo blockchainInfo = getBitcoindService().getBlockchainInfo();
@@ -168,7 +168,7 @@ public class BitcoindClient {
                     if(earliestBirthDate.before(prunedDate)) {
                         if(!prunedWarningShown) {
                             prunedWarningShown = true;
-                            Platform.runLater(() -> EventManager.get().post(new CormorantPruneStatusEvent("Error: Wallet birthday earlier than Bitcoin Core prune date", wallet, earliestBirthDate, prunedDate, legacyWalletExists)));
+                            Platform.runLater(() -> EventManager.get().post(new CormorantPruneStatusEvent("Error: Wallet birthday earlier than Groestlcoin Core prune date", wallet, earliestBirthDate, prunedDate, legacyWalletExists)));
                         }
                         throw new ImportFailedException("Wallet birthday earlier than prune date");
                     }
@@ -558,7 +558,7 @@ public class BitcoindClient {
                 }
             } catch(Exception e) {
                 lastPollException = e;
-                log.warn("Error polling Bitcoin Core: " + e.getMessage());
+                log.warn("Error polling Groestlcoin Core: " + e.getMessage());
 
                 if(syncing) {
                     syncingLock.lock();

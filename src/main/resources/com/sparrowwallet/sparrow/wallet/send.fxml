@@ -112,8 +112,8 @@
                             <ComboBox fx:id="feeAmountUnit" styleClass="amount-unit">
                                 <items>
                                     <FXCollections fx:factory="observableArrayList">
-                                        <BitcoinUnit fx:constant="BTC" />
-                                        <BitcoinUnit fx:constant="SATOSHIS" />
+                                        <BitcoinUnit fx:constant="GRS" />
+                                        <BitcoinUnit fx:constant="GROS" />
                                     </FXCollections>
                                 </items>
                             </ComboBox>

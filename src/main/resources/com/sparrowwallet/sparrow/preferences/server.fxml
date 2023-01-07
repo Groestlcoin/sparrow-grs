@@ -54,7 +54,7 @@
                                 <ServerType fx:constant="BITCOIN_CORE"/>
                             </userData>
                         </ToggleButton>
-                        <ToggleButton text="Private Electrum" toggleGroup="$serverTypeToggleGroup">
+                        <ToggleButton text="Private Electrum-GRS" toggleGroup="$serverTypeToggleGroup">
                             <graphic>
                                 <Glyph fontFamily="Font Awesome 5 Free Solid" fontSize="12" icon="TOGGLE_ON" styleClass="private-electrum" />
                             </graphic>
@@ -148,7 +148,7 @@
     </Form>
 
     <Form fx:id="electrumForm" GridPane.columnIndex="0" GridPane.rowIndex="1">
-        <Fieldset inputGrow="SOMETIMES" text="Private Electrum Server">
+        <Fieldset inputGrow="SOMETIMES" text="Private Electrum-GRS Server">
             <Field text="URL:">
                 <StackPane>
                     <ComboBox fx:id="recentElectrumServers" />

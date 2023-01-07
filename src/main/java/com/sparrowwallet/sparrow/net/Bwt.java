@@ -112,7 +112,7 @@ public class Bwt {
      * Start the bwt daemon with the provided wallets
      * Blocks until the daemon is shut down.
      *
-     * @param outputDescriptors descriptors of keys to add to Bitcoin Core
+     * @param outputDescriptors descriptors of keys to add to Groestlcoin Core
      * @param rescanSince seconds since epoch to start scanning keys
      * @param gapLimit desired gap limit beyond last used address
      * @param callback object receiving notifications
@@ -310,7 +310,7 @@ public class Bwt {
                                 Bwt.this.shutdown();
                                 terminating = false;
                             } else {
-                                Platform.runLater(() -> EventManager.get().post(new BwtBootStatusEvent("Connecting to Bitcoin Core node " + Config.get().getServerDisplayName() + "...")));
+                                Platform.runLater(() -> EventManager.get().post(new BwtBootStatusEvent("Connecting to Groestlcoin Core node " + Config.get().getServerDisplayName() + "...")));
                             }
                         }
 
@@ -361,7 +361,7 @@ public class Bwt {
                         Bwt.this.start(notifier);
                     } else {
                         if(AppServices.get().getOpenWallets().keySet().stream().anyMatch(wallet -> wallet.getScriptType() == ScriptType.P2TR)) {
-                            throw new IllegalStateException("Taproot wallets are not yet supported when connecting to Bitcoin Core");
+                            throw new IllegalStateException("Taproot wallets are not yet supported when connecting to Groestlcoin Core");
                         }
 
                         Bwt.this.start(AppServices.get().getOpenWallets().keySet(), notifier);

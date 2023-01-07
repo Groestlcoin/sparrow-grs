@@ -16,8 +16,8 @@ import java.io.File;
 import java.util.*;
 
 public class SparrowWallet {
-    public static final String APP_ID = "com.sparrowwallet.sparrow";
-    public static final String APP_NAME = "Sparrow";
+    public static final String APP_ID = "org.groestlcoin.sparrow";
+    public static final String APP_NAME = "Sparrow-GRS";
     public static final String APP_VERSION = "1.7.1";
     public static final String APP_VERSION_SUFFIX = "";
     public static final String APP_HOME_PROPERTY = "sparrow.home";

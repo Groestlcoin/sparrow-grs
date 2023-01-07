@@ -451,7 +451,7 @@ public class AppController implements Initializable {
     }
 
     public void showLogFile(ActionEvent event) throws IOException {
-        File logFile = new File(Storage.getSparrowHome(), "sparrow.log");
+        File logFile = new File(Storage.getSparrowHome(), "sparrow-grs.log");
         if(logFile.exists()) {
             AppServices.get().getApplication().getHostServices().showDocument(logFile.toPath().toUri().toString());
         } else {
@@ -460,11 +460,11 @@ public class AppController implements Initializable {
     }
 
     public void openSupport(ActionEvent event) {
-        AppServices.get().getApplication().getHostServices().showDocument("https://sparrowwallet.com/opensupport");
+        AppServices.get().getApplication().getHostServices().showDocument("https://t.me/groestl");
     }
 
     public void submitBugReport(ActionEvent event) {
-        AppServices.get().getApplication().getHostServices().showDocument("https://sparrowwallet.com/submitbugreport");
+        AppServices.get().getApplication().getHostServices().showDocument("https://github.com/Groestlcoin/sparrow/issues");
     }
 
     public void showAbout(ActionEvent event) {
@@ -943,7 +943,7 @@ public class AppController implements Initializable {
     private String getServerToggleTooltipText(Integer currentBlockHeight) {
         if(AppServices.isConnected()) {
             return "Connected to " + Config.get().getServerDisplayName() + (currentBlockHeight != null ? " at height " + currentBlockHeight : "") +
-                    (Config.get().getServerType() == ServerType.PUBLIC_ELECTRUM_SERVER ? "\nWarning! You are connected to a public server and sharing your transaction data with it.\nFor better privacy, consider using your own Bitcoin Core node or private Electrum server." : "");
+                    (Config.get().getServerType() == ServerType.PUBLIC_ELECTRUM_SERVER ? "\nWarning! You are connected to a public server and sharing your transaction data with it.\nFor better privacy, consider using your own Groestlcoin Core node or private Electrum-GRS server." : "");
         } else if(AppServices.isConnecting()) {
             return "Connecting...";
         }
@@ -2623,16 +2623,16 @@ public class AppController implements Initializable {
     @Subscribe
     public void cormorantPruneStatus(CormorantPruneStatusEvent event) {
         if(event.legacyWalletExists()) {
-            Optional<ButtonType> optButtonType = AppServices.showErrorDialog("Error importing Bitcoin Core descriptor wallet",
+            Optional<ButtonType> optButtonType = AppServices.showErrorDialog("Error importing Groestlcoin Core descriptor wallet",
                     "The connected node is pruned at " + event.getPruneDateAsString() + ", but the wallet birthday for " + event.getWallet().getFullDisplayName() + " is set to " + event.getScanDateAsString() + ".\n\n" +
-                            "Do you want to try using the existing legacy Bitcoin Core wallet?", ButtonType.YES, ButtonType.NO);
+                            "Do you want to try using the existing legacy Groestlcoin Core wallet?", ButtonType.YES, ButtonType.NO);
             if(optButtonType.isPresent() && optButtonType.get() == ButtonType.YES) {
                 Config.get().setUseLegacyCoreWallet(true);
                 onlineProperty().set(false);
                 Platform.runLater(() -> onlineProperty().set(true));
             }
         } else {
-            AppServices.showErrorDialog("Error importing Bitcoin Core descriptor wallet",
+            AppServices.showErrorDialog("Error importing Groestlcoin Core descriptor wallet",
                     "The connected node is pruned at " + event.getPruneDateAsString() + ", but the wallet birthday for " + event.getWallet().getFullDisplayName() + " is set to " + event.getScanDateAsString() + ".");
         }
     }

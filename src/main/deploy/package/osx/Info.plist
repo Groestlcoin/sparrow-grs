@@ -39,10 +39,10 @@
   <array>
       <dict>
           <key>CFBundleURLName</key>
-          <string>com.sparrowwallet.sparrow.bitcoin</string>
+          <string>com.sparrowwallet.sparrow.groestlcoin</string>
           <key>CFBundleURLSchemes</key>
           <array>
-            <string>bitcoin</string>
+            <string>groestlcoin</string>
           </array>
       </dict>
       <dict>
@@ -90,7 +90,7 @@
               </array>
           </dict>
           <key>UTTypeDescription</key>
-          <string>Bitcoin Transaction</string>
+          <string>Groestlcoin Transaction</string>
           <key>UTTypeIconFile</key>
           <string>sparrow.icns</string>
       </dict>
@@ -121,7 +121,7 @@
             <string>txn</string>
         </array>
         <key>CFBundleTypeName</key>
-        <string>Bitcoin Transaction</string>
+        <string>Groestlcoin Transaction</string>
         <key>LSHandlerRank</key>
         <string>Default</string>
      </dict>

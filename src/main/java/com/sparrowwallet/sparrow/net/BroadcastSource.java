@@ -18,7 +18,7 @@ import java.security.SecureRandom;
 import java.util.List;
 
 public enum BroadcastSource {
-    BLOCKSTREAM_INFO("blockstream.info", "https://blockstream.info", "http://explorerzydxu5ecjrkwceayqybizmpjjznk5izmitf2modhcusuqlid.onion") {
+    BLOCKSTREAM_INFO("esplora.groestlcoin.org", "https://esplora.groestlcoin.org", "http://explorerzydxu5ecjrkwceayqybizmpjjznk5izmitf2modhcusuqlid.onion") {
         @Override
         public Sha256Hash broadcastTransaction(Transaction transaction) throws BroadcastException {
             String data = Utils.bytesToHex(transaction.bitcoinSerialize());

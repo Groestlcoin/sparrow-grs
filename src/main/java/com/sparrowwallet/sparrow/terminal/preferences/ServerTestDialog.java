@@ -205,7 +205,7 @@ public class ServerTestDialog extends DialogWindow {
             reason += ". Check if the proxy server is running.";
         } else if(exception instanceof TorServerAlreadyBoundException) {
             reason += "\nIs a Tor proxy already running on port " + TorService.PROXY_PORT + "?";
-        } else if(reason != null && reason.contains("Check if Bitcoin Core is running")) {
+        } else if(reason != null && reason.contains("Check if Groestlcoin Core is running")) {
             reason += "\n\nSee https://sparrowwallet.com/docs/connect-node.html";
         }
 
@@ -217,7 +217,7 @@ public class ServerTestDialog extends DialogWindow {
     public void cormorantSyncStatus(CormorantSyncStatusEvent event) {
         if(connectionService != null && connectionService.isRunning() && event.getProgress() < 100) {
             DateFormat dateFormat = new SimpleDateFormat("yyyy/MM/dd HH:mm");
-            appendText("\nThe connection to the Bitcoin Core node was successful, but it is still syncing and cannot be used yet.");
+            appendText("\nThe connection to the Groestlcoin Core node was successful, but it is still syncing and cannot be used yet.");
             appendText("\nCurrently " + event.getProgress() + "% completed to date " + dateFormat.format(event.getTip()));
             connectionService.cancel();
         }
@@ -234,7 +234,7 @@ public class ServerTestDialog extends DialogWindow {
     public void bwtSyncStatus(BwtSyncStatusEvent event) {
         if(connectionService != null && connectionService.isRunning() && event.getProgress() < 100) {
             DateFormat dateFormat = new SimpleDateFormat("yyyy/MM/dd HH:mm");
-            appendText("\nThe connection to the Bitcoin Core node was successful, but it is still syncing and cannot be used yet.");
+            appendText("\nThe connection to the Groestlcoin Core node was successful, but it is still syncing and cannot be used yet.");
             appendText("\nCurrently " + event.getProgress() + "% completed to date " + dateFormat.format(event.getTip()));
             connectionService.cancel();
         }

@@ -258,7 +258,7 @@ public class AppServices {
 
     private ElectrumServer.ConnectionService createConnectionService() {
         ElectrumServer.ConnectionService connectionService = new ElectrumServer.ConnectionService();
-        //Delay startup on first connection to Bitcoin Core to allow any unencrypted wallets to open first
+        //Delay startup on first connection to Groestlcoin Core to allow any unencrypted wallets to open first
         connectionService.setDelay(Config.get().getServerType() == ServerType.BITCOIN_CORE ? Duration.seconds(CONNECTION_DELAY_SECS) : Duration.ZERO);
         connectionService.setPeriod(Duration.seconds(SERVER_PING_PERIOD_SECS));
         connectionService.setRestartOnFailure(true);
@@ -902,7 +902,7 @@ public class AppServices {
                 Platform.runLater(() -> EventManager.get().post(new SendPaymentsEvent(sendingWallet, List.of(bitcoinURI.toPayment()))));
             }
         } catch(Exception e) {
-            showErrorDialog("Not a valid bitcoin URI", e.getMessage());
+            showErrorDialog("Not a valid groestlcoin URI", e.getMessage());
         }
     }
 
