@@ -33,7 +33,7 @@ jobs:
           name: Sparrow-GRS Build - ${{ runner.os }}
           path: |
             build/jpackage/*
-            !build/jpackage/Sparrow/
+            !build/jpackage/Sparrow-GRS/
       - name: Headless build with Gradle
         if: ${{ runner.os == 'Linux' }}
         run: ./gradlew -Djava.awt.headless=true clean jpackage
@@ -50,4 +50,4 @@ jobs:
           name: Sparrow-GRS Build - ${{ runner.os }} Headless
           path: |
             build/jpackage/*
-            !build/jpackage/Sparrow/
+            !build/jpackage/Sparrow-GRS/
