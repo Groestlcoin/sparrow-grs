@@ -73,8 +73,8 @@ public enum ExchangeSource {
         @Override
         public List<Currency> getSupportedCurrencies() {
             return getRates().market_data.current_price.entrySet().stream().filter(
-                rate -> isValidISO4217Code(rate.getKey().toUpperCase())
-            ).map(rate -> Currency.getInstance(rate.getKey().toUpperCase())).collect(Collectors.toList());
+                rate -> isValidISO4217Code(rate.getKey().toUpperCase(Locale.ROOT))
+            ).map(rate -> Currency.getInstance(rate.getKey().toUpperCase(Locale.ROOT))).collect(Collectors.toList());
         }
 
         @Override
@@ -89,7 +89,7 @@ public enum ExchangeSource {
         }
 
         private CoinGeckoData getRates() {
-            String url = "https://api.coingecko.com/api/v3/exchange_rates";
+            String url = "https://api.coingecko.com/api/v3/coins/groestlcoin?tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false";
             Proxy proxy = AppServices.getProxy();
 
             if(log.isInfoEnabled()) {
