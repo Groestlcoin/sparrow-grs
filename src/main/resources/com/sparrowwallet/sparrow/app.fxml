@@ -74,12 +74,12 @@
                                 </RadioMenuItem>
                                 <RadioMenuItem mnemonicParsing="false" text="GRS" toggleGroup="$bitcoinUnit" onAction="#setBitcoinUnit">
                                     <userData>
-                                        <BitcoinUnit fx:constant="GRS" />
+                                        <BitcoinUnit fx:constant="BTC" />
                                     </userData>
                                 </RadioMenuItem>
                                 <RadioMenuItem mnemonicParsing="false" text="gro" toggleGroup="$bitcoinUnit" onAction="#setBitcoinUnit">
                                     <userData>
-                                        <BitcoinUnit fx:constant="GROS" />
+                                        <BitcoinUnit fx:constant="SATOSHIS" />
                                     </userData>
                                 </RadioMenuItem>
                             </items>
