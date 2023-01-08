@@ -36,7 +36,7 @@ public class Electrum implements KeystoreFileImport, WalletImport, WalletExport 
 
     @Override
     public String getKeystoreImportDescription(int account) {
-        return "Import a single keystore from an Electrum-GRS wallet (use File > Import > Electrum to import a multisig wallet).";
+        return "Import a single keystore from an Electrum-GRS wallet (use File > Import > Electrum-GRS to import a multisig wallet).";
     }
 
     @Override

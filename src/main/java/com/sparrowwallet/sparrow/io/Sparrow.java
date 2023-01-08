@@ -80,7 +80,7 @@ public class Sparrow implements WalletImport, WalletExport {
 
     @Override
     public String getWalletImportDescription() {
-        return "Imports an exported Sparrow-GRS wallet file into Sparrow's wallets folder.";
+        return "Imports an exported Sparrow-GRS wallet file into Sparrow-GRS wallets folder.";
     }
 
     @Override
