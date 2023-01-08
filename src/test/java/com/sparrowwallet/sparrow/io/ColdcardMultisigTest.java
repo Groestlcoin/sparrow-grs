@@ -109,7 +109,7 @@ public class ColdcardMultisigTest extends IoTest {
         byte[] exportedBytes = baos.toByteArray();
         String original = new String(walletBytes);
         String exported = new String(exportedBytes);
-        Assert.assertEquals(original.replaceAll("created on [0-9A-F]+", ""), exported.replace("created by Sparrow", ""));
+        Assert.assertEquals(original.replaceAll("created on [0-9A-F]+", ""), exported.replace("created by Sparrow-GRS", ""));
     }
 
     @Test

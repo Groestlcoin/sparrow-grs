@@ -28,7 +28,7 @@ public class PassportMultisig extends ColdcardMultisig {
 
     @Override
     public String getKeystoreImportDescription(int account) {
-        return "Import file or QR created from Manage Account > Connect Wallet > Sparrow > Multisig > QR Code/microSD on your Passport.";
+        return "Import file or QR created from Manage Account > Connect Wallet > Sparrow-GRS > Multisig > QR Code/microSD on your Passport.";
     }
 
     @Override

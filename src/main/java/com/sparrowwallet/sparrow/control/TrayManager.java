@@ -43,9 +43,9 @@ public class TrayManager {
 
             BaseMultiResolutionImage mrImage = new BaseMultiResolutionImage(imgList.toArray(new Image[0]));
 
-            this.trayIcon = new TrayIcon(mrImage, "Sparrow", popupMenu);
+            this.trayIcon = new TrayIcon(mrImage, "Sparrow-GRS", popupMenu);
 
-            MenuItem miExit = new MenuItem("Quit Sparrow");
+            MenuItem miExit = new MenuItem("Quit Sparrow-GRS");
             miExit.addActionListener(e -> {
                 SwingUtilities.invokeLater(() -> { tray.remove(this.trayIcon); });
                 Platform.exit();

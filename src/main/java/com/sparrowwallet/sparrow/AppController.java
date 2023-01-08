@@ -249,7 +249,7 @@ public class AppController implements Initializable {
             closeTab.setDisable(tabs.getTabs().isEmpty());
             if(tabs.getTabs().isEmpty()) {
                 Stage tabStage = (Stage) tabs.getScene().getWindow();
-                tabStage.setTitle("Sparrow");
+                tabStage.setTitle("Sparrow-GRS");
                 saveTransaction.setVisible(true);
                 saveTransaction.setDisable(true);
                 exportWallet.setDisable(true);
@@ -2373,7 +2373,7 @@ public class AppController implements Initializable {
                         .graphic(new ImageView(image))
                         .hideAfter(Duration.seconds(15))
                         .position(Pos.TOP_RIGHT)
-                        .threshold(5, Notifications.create().title("Sparrow").text("Multiple new wallet transactions").graphic(new ImageView(image)))
+                        .threshold(5, Notifications.create().title("Sparrow-GRS").text("Multiple new wallet transactions").graphic(new ImageView(image)))
                         .onAction(e -> selectTab(event.getWallet()));
 
                 //If controlsfx can't find our window, we must set the window ourselves (unfortunately notification is then shown within this window)
@@ -2406,7 +2406,7 @@ public class AppController implements Initializable {
 
     @Subscribe
     public void versionUpdated(VersionUpdatedEvent event) {
-        Hyperlink versionUpdateLabel = new Hyperlink("Sparrow " + event.getVersion() + " available");
+        Hyperlink versionUpdateLabel = new Hyperlink("Sparrow-GRS " + event.getVersion() + " available");
         versionUpdateLabel.getStyleClass().add("version-hyperlink");
         versionUpdateLabel.setOnAction(event1 -> {
             AppServices.get().getApplication().getHostServices().showDocument("https://github.com/Groestlcoin/sparrow/releases/");

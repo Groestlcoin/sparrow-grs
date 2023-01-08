@@ -37,7 +37,7 @@ public class SparrowTextGui extends MultiWindowTextGUI {
         Panel panel = new Panel(new BorderLayout());
 
         titleBar = new Panel(new GridLayout(2));
-        new Label("Sparrow Terminal").addTo(titleBar);
+        new Label("Sparrow-GRS Terminal").addTo(titleBar);
         this.connectedLabel = new Label("Disconnected");
         titleBar.addComponent(connectedLabel, GridLayout.createLayoutData(GridLayout.Alignment.END, GridLayout.Alignment.CENTER, true, false));
         panel.addComponent(titleBar, BorderLayout.Location.TOP);

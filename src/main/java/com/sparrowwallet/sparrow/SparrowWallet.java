@@ -35,7 +35,7 @@ public class SparrowWallet {
         }
 
         if(args.version) {
-            System.out.println("Sparrow Wallet " + APP_VERSION);
+            System.out.println("Sparrow-GRS Wallet " + APP_VERSION);
             System.exit(0);
         }
 
@@ -45,7 +45,7 @@ public class SparrowWallet {
 
         if(args.dir != null) {
             System.setProperty(APP_HOME_PROPERTY, args.dir);
-            getLogger().info("Using configured Sparrow home folder of " + args.dir);
+            getLogger().info("Using configured Sparrow-GRS home folder of " + args.dir);
         }
 
         if(args.network != null) {
@@ -106,7 +106,7 @@ public class SparrowWallet {
         } catch(UnsupportedOperationException e) {
             Drongo.removeRootLogAppender("STDOUT");
             getLogger().error("Unable to launch application", e);
-            System.out.println("No display detected. Use Sparrow Server on a headless (no display) system.");
+            System.out.println("No display detected. Use Sparrow-GRS Server on a headless (no display) system.");
 
             try {
                 if(instance != null) {

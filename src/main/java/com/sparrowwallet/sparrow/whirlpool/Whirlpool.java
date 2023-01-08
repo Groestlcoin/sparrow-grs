@@ -104,7 +104,7 @@ public class Whirlpool {
 
         WhirlpoolWalletConfig whirlpoolWalletConfig = new WhirlpoolWalletConfig(dataSourceFactory, httpClientService, stompClientService, torClientService, serverApi, whirlpoolServer.getParams(), false);
         whirlpoolWalletConfig.setDataPersisterFactory(dataPersisterFactory);
-        whirlpoolWalletConfig.setPartner("SPARROW");
+        whirlpoolWalletConfig.setPartner("SPARROW-GRS");
         whirlpoolWalletConfig.setIndexRangePostmix(IndexRange.FULL);
         return whirlpoolWalletConfig;
     }

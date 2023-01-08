@@ -148,7 +148,7 @@ public class ElectrumServer {
     }
 
     public List<String> getServerVersion() throws ServerException {
-        return electrumServerRpc.getServerVersion(getTransport(), "Sparrow", SUPPORTED_VERSIONS);
+        return electrumServerRpc.getServerVersion(getTransport(), "Sparrow-GRS", SUPPORTED_VERSIONS);
     }
 
     public String getServerBanner() throws ServerException {

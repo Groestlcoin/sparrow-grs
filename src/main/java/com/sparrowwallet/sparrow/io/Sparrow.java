@@ -19,7 +19,7 @@ public class Sparrow implements WalletImport, WalletExport {
 
     @Override
     public String getName() {
-        return "Sparrow";
+        return "Sparrow-GRS";
     }
 
     @Override
@@ -48,14 +48,14 @@ public class Sparrow implements WalletImport, WalletExport {
             outputStream.flush();
             tempStorage.getWalletFile().delete();
         } catch(Exception e) {
-            log.error("Error exporting Sparrow wallet file", e);
-            throw new ExportException("Error exporting Sparrow wallet file", e);
+            log.error("Error exporting Sparrow-GRS wallet file", e);
+            throw new ExportException("Error exporting Sparrow-GRS wallet file", e);
         }
     }
 
     @Override
     public String getWalletExportDescription() {
-        return "Exports your Sparrow wallet file, which can be imported into another Sparrow instance running on any supported platform. If the wallet is encrypted, the same password is used to encrypt the exported file.";
+        return "Exports your Sparrow-GRS wallet file, which can be imported into another Sparrow-GRS instance running on any supported platform. If the wallet is encrypted, the same password is used to encrypt the exported file.";
     }
 
     @Override
@@ -80,7 +80,7 @@ public class Sparrow implements WalletImport, WalletExport {
 
     @Override
     public String getWalletImportDescription() {
-        return "Imports an exported Sparrow wallet file into Sparrow's wallets folder.";
+        return "Imports an exported Sparrow-GRS wallet file into Sparrow's wallets folder.";
     }
 
     @Override
@@ -89,7 +89,7 @@ public class Sparrow implements WalletImport, WalletExport {
         Wallet wallet = null;
         File tempFile = null;
         try {
-            tempFile = File.createTempFile("sparrow", null);
+            tempFile = File.createTempFile("sparrow-grs", null);
             java.nio.file.Files.copy(inputStream, tempFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
             PersistenceType persistenceType = Storage.detectPersistenceType(tempFile);
             persistenceType = (persistenceType == null ? PersistenceType.JSON : persistenceType);
@@ -113,7 +113,7 @@ public class Sparrow implements WalletImport, WalletExport {
 
             return wallet;
         } catch(IOException | StorageException e) {
-            throw new ImportException("Error importing Sparrow wallet", e);
+            throw new ImportException("Error importing Sparrow-GRS wallet", e);
         } finally {
             if(storage != null) {
                 storage.close();

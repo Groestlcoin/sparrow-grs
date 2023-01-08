@@ -68,7 +68,7 @@ public class StorageTest extends IoTest {
         Wallet wallet = storage.loadEncryptedWallet("pass").getWallet();
         Assert.assertTrue(wallet.isValid());
 
-        File tempWallet = File.createTempFile("sparrow", "tmp");
+        File tempWallet = File.createTempFile("sparrow-grs", "tmp");
         tempWallet.deleteOnExit();
 
         Storage tempStorage = new Storage(tempWallet);

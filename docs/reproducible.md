@@ -1,6 +1,6 @@
 # Reproducible builds
 
-Reproducibility is a goal of the Sparrow Wallet project.
+Reproducibility is a goal of the Sparrow-GRS Wallet project.
 As of v1.5.0 and later, it is possible to recreate the exact binaries in the Github releases (specifically, the contents of the `.tar.gz` and `.zip` files).
 
 Due to minor variances, it is not yet possible to reproduce the installer packages (`.deb`, `.rpm` and `.exe`).
@@ -11,7 +11,7 @@ Work on resolving both of these issues is ongoing.
 
 ### Install Java
 
-Because Sparrow bundles a Java runtime in the release binaries, it is essential to have the same version of Java installed when creating the release.
+Because Sparrow-GRS bundles a Java runtime in the release binaries, it is essential to have the same version of Java installed when creating the release.
 For v1.6.6 and later, this is Eclipse Temurin 18.0.1+10.
 
 #### Java from Adoptium github repo
@@ -99,16 +99,16 @@ git pull --recurse-submodules
 git checkout "${GIT_TAG}"
 ```
 
-Note - there is an additional step if you updated rather than initially cloned your repo at `GIT_TAG`. 
-This is due to the [drongo submodule](https://github.com/sparrowwallet/drongo/tree/master) which needs to be checked out to the commit state it had at the time of the release. 
-Only then your build will be comparable to the provided one in the release section of Github. 
+Note - there is an additional step if you updated rather than initially cloned your repo at `GIT_TAG`.
+This is due to the [drongo submodule](https://github.com/sparrowwallet/drongo/tree/master) which needs to be checked out to the commit state it had at the time of the release.
+Only then your build will be comparable to the provided one in the release section of Github.
 To checkout the submodule to the correct commit for `GIT_TAG`, additionally run:
 
 ```shell
 git submodule update --checkout
 ```
 
-Thereafter, building should be straightforward. If not already done, change into the sparrow folder and run:
+Thereafter, building should be straightforward. If not already done, change into the sparrow-grs folder and run:
 
 ```shell
 cd {yourPathToSparrow}/sparrow  # if you aren't already in the sparrow folder
@@ -121,12 +121,12 @@ The binaries (and installers) will be placed in the `build/jpackage` folder.
 
 Verify the built binaries against the released binaries on https://github.com/sparrowwallet/sparrow/releases.
 
-Note that you will be verifying the files in the `build/jpackage/Sparrow` folder against either the `.tar.gz` or `.zip` releases.
+Note that you will be verifying the files in the `build/jpackage/Sparrow-GRS` folder against either the `.tar.gz` or `.zip` releases.
 Download either of these depending on your platform and extract the contents to a folder (in the following example, `/tmp`).
 Then compare all of the folders and files recursively:
 
 ```shell
-diff -r build/jpackage/Sparrow /tmp/Sparrow
+diff -r build/jpackage/Sparrow-GRS /tmp/Sparrow-GRS
 ```
 
 This command should have no output indicating that the two folders (and all their contents) are identical.
