@@ -2,17 +2,17 @@
 
 Sparrow-GRS is a modern desktop Groestlcoin wallet application supporting most hardware wallets and built on common standards such as PSBT, with an emphasis on transparency and usability.
 
-More information (and release binaries) can be found at https://groestlcoin.org. Release binaries are also available directly from [Github](https://github.com/Groestlcoin/sparrow/releases).
+More information (and release binaries) can be found at https://groestlcoin.org. Release binaries are also available directly from [Github](https://github.com/Groestlcoin/sparrow-grs/releases).
 
 ## Building
 
 To clone this project, use
 
-`git clone --recursive https://github.com/Groestlcoin/sparrow`
+`git clone --recursive https://github.com/Groestlcoin/sparrow-grs`
 
 or for those without SSH credentials:
 
-`git clone --recursive https://github.com/sparrowwallet/sparrow.git`
+`git clone --recursive https://github.com/Groestlcoin/sparrow-grs.git`
 
 In order to build, Sparrow-GRS requires Java 17 or higher to be installed.
 The release binaries are built with [Eclipse Temurin 18.0.1+10](https://github.com/adoptium/temurin18-binaries/releases/tag/jdk-18.0.1%2B10).
@@ -38,7 +38,7 @@ The release binaries are reproducible from v1.5.0 onwards (pre codesigning and i
 
 If you prefer to run Sparrow-GRS directly from source, it can be launched from within the project directory with
 
-`./sparrow`
+`./sparrow-grs`
 
 Java 17 or higher must be installed.
 
@@ -83,7 +83,7 @@ Testnet, regtest and signet configurations (along with their wallets) are stored
 
 ## Reporting Issues
 
-Please use the [Issues](https://github.com/Groestlcoin/sparrow/issues) tab above to report an issue. If possible, look in the sparrow-grs.log file in the configuration directory for information helpful in debugging.
+Please use the [Issues](https://github.com/Groestlcoin/sparrow-grs/issues) tab above to report an issue. If possible, look in the sparrow-grs.log file in the configuration directory for information helpful in debugging.
 
 ## License
 

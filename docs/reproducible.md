@@ -88,19 +88,19 @@ GIT_TAG="1.7.1"
 The project can then be initially cloned as follows:
 
 ```shell
-git clone --recursive --branch "${GIT_TAG}" https://github.com/sparrowwallet/sparrow.git
+git clone --recursive --branch "${GIT_TAG}" https://github.com/groestlcoin/sparrow-grs.git
 ```
 
-If you already have the sparrow repo cloned, fetch all new updates and checkout the release. For this, change into your local sparrow folder and execute:
+If you already have the sparrow-grs repo cloned, fetch all new updates and checkout the release. For this, change into your local sparrow-grs folder and execute:
 
 ```shell
-cd {yourPathToSparrow}/sparrow
+cd {yourPathToSparrow}/sparrow-grs
 git pull --recurse-submodules
 git checkout "${GIT_TAG}"
 ```
 
 Note - there is an additional step if you updated rather than initially cloned your repo at `GIT_TAG`.
-This is due to the [drongo submodule](https://github.com/sparrowwallet/drongo/tree/master) which needs to be checked out to the commit state it had at the time of the release.
+This is due to the [drongo submodule](https://github.com/Groestlcoin/drongo/tree/master) which needs to be checked out to the commit state it had at the time of the release.
 Only then your build will be comparable to the provided one in the release section of Github.
 To checkout the submodule to the correct commit for `GIT_TAG`, additionally run:
 
@@ -111,7 +111,7 @@ git submodule update --checkout
 Thereafter, building should be straightforward. If not already done, change into the sparrow-grs folder and run:
 
 ```shell
-cd {yourPathToSparrow}/sparrow  # if you aren't already in the sparrow folder
+cd {yourPathToSparrow}/sparrow-grs  # if you aren't already in the sparrow-grs folder
 ./gradlew jpackage
 ```
 
@@ -119,7 +119,7 @@ The binaries (and installers) will be placed in the `build/jpackage` folder.
 
 ### Verifying the binaries are identical
 
-Verify the built binaries against the released binaries on https://github.com/sparrowwallet/sparrow/releases.
+Verify the built binaries against the released binaries on https://github.com/Groestlcoin/sparrow-grs/releases.
 
 Note that you will be verifying the files in the `build/jpackage/Sparrow-GRS` folder against either the `.tar.gz` or `.zip` releases.
 Download either of these depending on your platform and extract the contents to a folder (in the following example, `/tmp`).

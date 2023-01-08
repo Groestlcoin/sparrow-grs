@@ -1,8 +1,8 @@
 [Desktop Entry]
-Name=Sparrow
-Comment=Sparrow
-Exec=/opt/sparrow/bin/Sparrow %U
-Icon=/opt/sparrow/lib/Sparrow.png
+Name=Sparrow-GRS
+Comment=Sparrow-GRS
+Exec=/opt/sparrow-grs/bin/Sparrow-GRS %U
+Icon=/opt/sparrow-grs/lib/Sparrow-GRS.png
 Terminal=false
 Type=Application
 Categories=Unknown

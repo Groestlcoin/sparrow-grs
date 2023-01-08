@@ -464,7 +464,7 @@ public class AppController implements Initializable {
     }
 
     public void submitBugReport(ActionEvent event) {
-        AppServices.get().getApplication().getHostServices().showDocument("https://github.com/Groestlcoin/sparrow/issues");
+        AppServices.get().getApplication().getHostServices().showDocument("https://github.com/Groestlcoin/sparrow-grs/issues");
     }
 
     public void showAbout(ActionEvent event) {
@@ -2409,7 +2409,7 @@ public class AppController implements Initializable {
         Hyperlink versionUpdateLabel = new Hyperlink("Sparrow-GRS " + event.getVersion() + " available");
         versionUpdateLabel.getStyleClass().add("version-hyperlink");
         versionUpdateLabel.setOnAction(event1 -> {
-            AppServices.get().getApplication().getHostServices().showDocument("https://github.com/Groestlcoin/sparrow/releases/");
+            AppServices.get().getApplication().getHostServices().showDocument("https://github.com/Groestlcoin/sparrow-grs/releases/");
         });
 
         Hyperlink existingUpdateLabel = null;
