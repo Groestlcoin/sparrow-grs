@@ -35,8 +35,8 @@
                     <items>
                         <FXCollections fx:factory="observableArrayList">
                             <BitcoinUnit fx:constant="AUTO" />
-                            <BitcoinUnit fx:constant="GRS" />
-                            <BitcoinUnit fx:constant="GROS" />
+                            <BitcoinUnit fx:constant="BTC" />
+                            <BitcoinUnit fx:constant="SATOSHIS" />
                         </FXCollections>
                     </items>
                 </ComboBox>
