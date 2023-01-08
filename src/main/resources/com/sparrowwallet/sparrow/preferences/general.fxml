@@ -64,7 +64,7 @@
                     <items>
                         <FXCollections fx:factory="observableArrayList">
                             <ExchangeSource fx:constant="NONE" />
-                            <!--ExchangeSource fx:constant="COINBASE" /-->
+                            <ExchangeSource fx:constant="COINBASE" />
                             <ExchangeSource fx:constant="COINGECKO" />
                         </FXCollections>
                     </items>
