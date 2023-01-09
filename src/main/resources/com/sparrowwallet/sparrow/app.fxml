@@ -131,9 +131,9 @@
                     <MenuItem mnemonicParsing="false" text="Sign/Verify Message" accelerator="Shortcut+M" onAction="#signVerifyMessage"/>
                     <MenuItem fx:id="sendToMany" mnemonicParsing="false" text="Send To Many" onAction="#sendToMany"/>
                     <MenuItem fx:id="sweepPrivateKey" mnemonicParsing="false" text="Sweep Private Key" onAction="#sweepPrivateKey"/>
-                    <SeparatorMenuItem />
+                    <!-- <SeparatorMenuItem />
                     <MenuItem fx:id="findMixingPartner" mnemonicParsing="false" text="Find Mix Partner" onAction="#findMixingPartner"/>
-                    <MenuItem fx:id="showPayNym" mnemonicParsing="false" text="Show PayNym" onAction="#showPayNym"/>
+                    <MenuItem fx:id="showPayNym" mnemonicParsing="false" text="Show PayNym" onAction="#showPayNym"/> -->
                     <SeparatorMenuItem />
                     <Menu fx:id="switchServer" text="Switch Server"/>
                     <MenuItem styleClass="osxHide,windowsHide" mnemonicParsing="false" text="Install Udev Rules" onAction="#installUdevRules"/>
