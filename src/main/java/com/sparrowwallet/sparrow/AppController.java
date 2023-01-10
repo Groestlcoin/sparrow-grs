@@ -377,8 +377,8 @@ public class AppController implements Initializable {
         refreshWallet.disableProperty().bind(Bindings.or(exportWallet.disableProperty(), Bindings.or(serverToggle.disableProperty(), AppServices.onlineProperty().not())));
         sendToMany.disableProperty().bind(exportWallet.disableProperty());
         sweepPrivateKey.disableProperty().bind(Bindings.or(serverToggle.disableProperty(), AppServices.onlineProperty().not()));
-        showPayNym.setDisable(true);
-        findMixingPartner.setDisable(true);
+        //showPayNym.setDisable(true);
+        //findMixingPartner.setDisable(true);
         AppServices.onlineProperty().addListener((observable, oldValue, newValue) -> {
             findMixingPartner.setDisable(exportWallet.isDisable() || getSelectedWalletForm() == null || !SorobanServices.canWalletMix(getSelectedWalletForm().getWallet()) || !newValue);
         });
@@ -2229,8 +2229,8 @@ public class AppController implements Initializable {
                 exportWallet.setDisable(true);
                 showLoadingLog.setDisable(true);
                 showTxHex.setDisable(false);
-                showPayNym.setDisable(true);
-                findMixingPartner.setDisable(true);
+                //showPayNym.setDisable(true);
+                //findMixingPartner.setDisable(true);
             } else if(event instanceof WalletTabSelectedEvent) {
                 WalletTabSelectedEvent walletTabEvent = (WalletTabSelectedEvent)event;
                 WalletTabData walletTabData = walletTabEvent.getWalletTabData();
@@ -2267,8 +2267,8 @@ public class AppController implements Initializable {
         if(selectedWalletForm != null) {
             if(selectedWalletForm.getWalletId().equals(event.getWalletId())) {
                 exportWallet.setDisable(!event.getWallet().isValid() || selectedWalletForm.isLocked());
-                showPayNym.setDisable(exportWallet.isDisable() || !event.getWallet().hasPaymentCode());
-                findMixingPartner.setDisable(exportWallet.isDisable() || !SorobanServices.canWalletMix(event.getWallet()) || !AppServices.onlineProperty().get());
+                //showPayNym.setDisable(exportWallet.isDisable() || !event.getWallet().hasPaymentCode());
+                //findMixingPartner.setDisable(exportWallet.isDisable() || !SorobanServices.canWalletMix(event.getWallet()) || !AppServices.onlineProperty().get());
             }
         }
 
