@@ -481,7 +481,7 @@ public class TransactionDiagram extends GridPane {
                             TransactionOutput txOutput = blockTransaction.getTransaction().getOutputs().get((int) input.getIndex());
                             Address fromAddress = txOutput.getScript().getToAddress();
                             inputValue = txOutput.getValue();
-                            tooltip.setText("Input of " + getSatsValue(inputValue) + " sats\n" + input.getHashAsString() + ":" + input.getIndex() + (fromAddress != null ? "\n" + fromAddress : ""));
+                            tooltip.setText("Input of " + getSatsValue(inputValue) + " gros\n" + input.getHashAsString() + ":" + input.getIndex() + (fromAddress != null ? "\n" + fromAddress : ""));
 
                             ContextMenu contextMenu = new LabelContextMenu(fromAddress, inputValue);
                             label.setContextMenu(contextMenu);
