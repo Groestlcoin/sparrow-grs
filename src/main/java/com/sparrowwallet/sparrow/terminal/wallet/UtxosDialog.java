@@ -110,7 +110,7 @@ public class UtxosDialog extends WalletDialog {
             if(utxos.getTableModel().getRowCount() > utxos.getSelectedRow()) {
                 TableCell dateCell = utxos.getTableModel().getRow(utxos.getSelectedRow()).get(0);
                 dateCell.setSelected(!dateCell.isSelected());
-                updateMixSelectedButton();
+                //updateMixSelectedButton();
             }
         });
 
@@ -332,7 +332,7 @@ public class UtxosDialog extends WalletDialog {
             return;
         }
 
-        mixSelected.setEnabled(!getSelectedEntries().isEmpty());
+        //mixSelected.setEnabled(!getSelectedEntries().isEmpty());
     }
 
     private List<UtxoEntry> getSelectedEntries() {

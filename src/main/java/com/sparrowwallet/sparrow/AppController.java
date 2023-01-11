@@ -2241,8 +2241,8 @@ public class AppController implements Initializable {
                 refreshWallet.setText(walletTabData.getWallet() == null || walletTabData.getWalletForm().getMasterWallet().getChildWallets().stream().allMatch(Wallet::isNested) ? "Refresh Wallet" : "Refresh Wallet Account");
                 showLoadingLog.setDisable(false);
                 showTxHex.setDisable(true);
-                showPayNym.setDisable(exportWallet.isDisable() || !walletTabData.getWallet().hasPaymentCode());
-                findMixingPartner.setDisable(exportWallet.isDisable() || !SorobanServices.canWalletMix(walletTabData.getWallet()) || !AppServices.onlineProperty().get());
+                //showPayNym.setDisable(exportWallet.isDisable() || !walletTabData.getWallet().hasPaymentCode());
+                //findMixingPartner.setDisable(exportWallet.isDisable() || !SorobanServices.canWalletMix(walletTabData.getWallet()) || !AppServices.onlineProperty().get());
             }
         }
     }

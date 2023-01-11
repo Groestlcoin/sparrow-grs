@@ -181,9 +181,9 @@ public class UtxosController extends WalletFormController implements Initializab
         clear.setDisable(true);
         sendSelected.setDisable(true);
         sendSelected.setTooltip(new Tooltip("Send selected UTXOs. Use " + (org.controlsfx.tools.Platform.getCurrent() == org.controlsfx.tools.Platform.OSX ? "Cmd" : "Ctrl") + "+click to select multiple." ));
-        mixSelected.managedProperty().bind(mixSelected.visibleProperty());
-        mixSelected.setVisible(canWalletMix());
-        mixSelected.setDisable(true);
+        //mixSelected.managedProperty().bind(mixSelected.visibleProperty());
+        //mixSelected.setVisible(canWalletMix());
+        //mixSelected.setDisable(true);
         AppServices.onlineProperty().addListener(new WeakChangeListener<>(mixingOnlineListener));
 
         utxosTable.getSelectionModel().getSelectedIndices().addListener((ListChangeListener<Integer>) c -> {
@@ -216,7 +216,7 @@ public class UtxosController extends WalletFormController implements Initializab
         selectAll.setDisable(utxosTable.getRoot().getChildren().size() == utxosTable.getSelectionModel().getSelectedCells().size());
         clear.setDisable(selectedEntries.isEmpty());
         sendSelected.setDisable(selectedEntries.isEmpty());
-        mixSelected.setDisable(selectedEntries.isEmpty() || !AppServices.isConnected());
+        //mixSelected.setDisable(selectedEntries.isEmpty() || !AppServices.isConnected());
 
         long selectedTotal = selectedEntries.stream().mapToLong(Entry::getValue).sum();
         if(selectedTotal > 0) {
@@ -514,7 +514,7 @@ public class UtxosController extends WalletFormController implements Initializab
             updateFields(walletUtxosEntry);
             utxosTable.updateAll(walletUtxosEntry);
             utxosChart.update(walletUtxosEntry);
-            mixSelected.setVisible(canWalletMix());
+            //mixSelected.setVisible(canWalletMix());
         }
     }
 
