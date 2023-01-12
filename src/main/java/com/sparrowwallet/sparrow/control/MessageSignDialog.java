@@ -155,7 +155,7 @@ public class MessageSignDialog extends Dialog<ButtonBar.ButtonData> {
         Field formatField = new Field();
         formatField.setText("Format:");
         formatGroup = new ToggleGroup();
-        formatElectrum = new ToggleButton("Standard (Electrum)");
+        formatElectrum = new ToggleButton("Standard (Electrum-GRS)");
         formatTrezor = new ToggleButton("BIP137 (Trezor)");
         SegmentedButton formatButtons = new SegmentedButton(formatElectrum, formatTrezor);
         formatButtons.setToggleGroup(formatGroup);
