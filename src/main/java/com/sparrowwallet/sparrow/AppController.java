@@ -379,9 +379,9 @@ public class AppController implements Initializable {
         sweepPrivateKey.disableProperty().bind(Bindings.or(serverToggle.disableProperty(), AppServices.onlineProperty().not()));
         //showPayNym.setDisable(true);
         //findMixingPartner.setDisable(true);
-        AppServices.onlineProperty().addListener((observable, oldValue, newValue) -> {
-            findMixingPartner.setDisable(exportWallet.isDisable() || getSelectedWalletForm() == null || !SorobanServices.canWalletMix(getSelectedWalletForm().getWallet()) || !newValue);
-        });
+        //AppServices.onlineProperty().addListener((observable, oldValue, newValue) -> {
+        //    findMixingPartner.setDisable(exportWallet.isDisable() || getSelectedWalletForm() == null || !SorobanServices.canWalletMix(getSelectedWalletForm().getWallet()) || !newValue);
+        //});
 
         configureSwitchServer();
         setServerType(Config.get().getServerType());
