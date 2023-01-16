@@ -7,21 +7,26 @@ import com.sparrowwallet.drongo.policy.Policy;
 import com.sparrowwallet.drongo.policy.PolicyType;
 import com.sparrowwallet.drongo.protocol.ScriptType;
 import com.sparrowwallet.drongo.wallet.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 
 public class CoboVaultSinglesig implements KeystoreFileImport, WalletImport {
+    private static final Logger log = LoggerFactory.getLogger(CoboVaultSinglesig.class);
+
     @Override
     public String getName() {
         return "Cobo Vault";
     }
 
     @Override
-    public String getKeystoreImportDescription() {
-        return "Import file or QR created by using the Settings > Watch-Only Wallet > Generic Wallet > Export Wallet feature on your Cobo Vault.";
+    public String getKeystoreImportDescription(int account) {
+        return "Import file or QR created by using the My Cobo Vault > ... > Export Wallet feature on your Cobo Vault.";
     }
 
     @Override
@@ -43,7 +48,7 @@ public class CoboVaultSinglesig implements KeystoreFileImport, WalletImport {
             keystore.setLabel(getName());
             keystore.setSource(KeystoreSource.HW_AIRGAPPED);
             keystore.setWalletModel(WalletModel.COBO_VAULT);
-            keystore.setKeyDerivation(new KeyDerivation(coboKeystore.MasterFingerprint.toLowerCase(), "m/" + coboKeystore.AccountKeyPath));
+            keystore.setKeyDerivation(new KeyDerivation(coboKeystore.MasterFingerprint.toLowerCase(Locale.ROOT), "m/" + coboKeystore.AccountKeyPath));
             keystore.setExtendedPublicKey(ExtendedKey.fromDescriptor(coboKeystore.ExtPubKey));
 
             ExtendedKey.Header header = ExtendedKey.Header.fromExtendedKey(coboKeystore.ExtPubKey);
@@ -53,7 +58,7 @@ public class CoboVaultSinglesig implements KeystoreFileImport, WalletImport {
 
             return keystore;
         } catch (Exception e) {
-            throw new ImportException(e);
+            throw new ImportException("Error getting " + getName() + " keystore", e);
         }
     }
 
@@ -76,7 +81,7 @@ public class CoboVaultSinglesig implements KeystoreFileImport, WalletImport {
         try {
             wallet.checkWallet();
         } catch(InvalidWalletException e) {
-            throw new ImportException("Imported Cobo Vault wallet was invalid: " + e.getMessage());
+            throw new ImportException("Imported " + getName() + " wallet was invalid: " + e.getMessage());
         }
 
         return wallet;
@@ -94,6 +99,11 @@ public class CoboVaultSinglesig implements KeystoreFileImport, WalletImport {
 
     @Override
     public boolean isKeystoreImportScannable() {
+        return true;
+    }
+
+    @Override
+    public boolean isDeprecated() {
         return true;
     }
 

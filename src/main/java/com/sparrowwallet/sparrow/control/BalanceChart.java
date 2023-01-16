@@ -1,20 +1,27 @@
 package com.sparrowwallet.sparrow.control;
 
+import com.google.common.collect.Lists;
 import com.sparrowwallet.drongo.BitcoinUnit;
 import com.sparrowwallet.drongo.wallet.Wallet;
+import com.sparrowwallet.sparrow.UnitFormat;
 import com.sparrowwallet.sparrow.io.Config;
+import com.sparrowwallet.sparrow.wallet.Entry;
 import com.sparrowwallet.sparrow.wallet.TransactionEntry;
 import com.sparrowwallet.sparrow.wallet.WalletTransactionsEntry;
 import javafx.beans.NamedArg;
 import javafx.scene.Node;
 import javafx.scene.chart.*;
 
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public class BalanceChart extends LineChart<Number, Number> {
+    private static final int MAX_VALUES = 500;
+
     private XYChart.Series<Number, Number> balanceSeries;
 
     private TransactionEntry selectedEntry;
@@ -29,15 +36,14 @@ public class BalanceChart extends LineChart<Number, Number> {
         getData().add(balanceSeries);
         update(walletTransactionsEntry);
 
-        BitcoinUnit unit = Config.get().getBitcoinUnit();
-        setBitcoinUnit(walletTransactionsEntry.getWallet(), unit);
+        setUnitFormat(walletTransactionsEntry.getWallet(), Config.get().getUnitFormat(), Config.get().getBitcoinUnit());
     }
 
     public void update(WalletTransactionsEntry walletTransactionsEntry) {
         setVisible(!walletTransactionsEntry.getChildren().isEmpty());
         balanceSeries.getData().clear();
 
-        List<Data<Number, Number>> balanceDataList = walletTransactionsEntry.getChildren().stream()
+        List<Data<Number, Number>> balanceDataList = getTransactionEntries(walletTransactionsEntry)
                 .map(entry -> (TransactionEntry)entry)
                 .filter(txEntry -> txEntry.getBlockTransaction().getHeight() > 0)
                 .map(txEntry -> new XYChart.Data<>((Number)txEntry.getBlockTransaction().getDate().getTime(), (Number)txEntry.getBalance(), txEntry))
@@ -74,6 +80,24 @@ public class BalanceChart extends LineChart<Number, Number> {
         }
     }
 
+    private Stream<Entry> getTransactionEntries(WalletTransactionsEntry walletTransactionsEntry) {
+        int total = walletTransactionsEntry.getChildren().size();
+        if(walletTransactionsEntry.getChildren().size() <= MAX_VALUES) {
+            return walletTransactionsEntry.getChildren().stream();
+        }
+
+        int bucketSize = total / MAX_VALUES;
+        List<List<Entry>> buckets = Lists.partition(walletTransactionsEntry.getChildren(), bucketSize);
+        List<Entry> reducedEntries = new ArrayList<>(MAX_VALUES);
+        for(List<Entry> bucket : buckets) {
+            long max = bucket.stream().mapToLong(entry -> Math.abs(entry.getValue())).max().orElse(0);
+            Entry bucketEntry = bucket.stream().filter(entry -> entry.getValue() == max || entry.getValue() == -max).findFirst().orElseThrow();
+            reducedEntries.add(bucketEntry);
+        }
+
+        return reducedEntries.stream();
+    }
+
     public void select(TransactionEntry transactionEntry) {
         Set<Node> selectedSymbols = lookupAll(".chart-line-symbol.selected");
         for(Node selectedSymbol : selectedSymbols) {
@@ -92,12 +116,16 @@ public class BalanceChart extends LineChart<Number, Number> {
         }
     }
 
-    public void setBitcoinUnit(Wallet wallet, BitcoinUnit unit) {
+    public void setUnitFormat(Wallet wallet, UnitFormat format, BitcoinUnit unit) {
+        if(format == null) {
+            format = UnitFormat.DOT;
+        }
+
         if(unit == null || unit.equals(BitcoinUnit.AUTO)) {
             unit = wallet.getAutoUnit();
         }
 
         NumberAxis yaxis = (NumberAxis)getYAxis();
-        yaxis.setTickLabelFormatter(new CoinAxisFormatter(yaxis, unit));
+        yaxis.setTickLabelFormatter(new CoinAxisFormatter(yaxis, format, unit));
     }
 }

@@ -13,10 +13,11 @@
 <?import com.sparrowwallet.sparrow.control.RelativeTimelockSpinner?>
 <?import com.sparrowwallet.sparrow.control.CopyableLabel?>
 <?import com.sparrowwallet.sparrow.control.IdLabel?>
-<?import com.sparrowwallet.sparrow.control.CoinLabel?>
+<?import com.sparrowwallet.sparrow.control.CopyableCoinLabel?>
 <?import com.sparrowwallet.sparrow.control.AddressLabel?>
 <?import com.sparrowwallet.sparrow.control.UnlabeledToggleSwitch?>
 <?import com.sparrowwallet.sparrow.control.ScriptArea?>
+<?import com.sparrowwallet.sparrow.control.IntegerSpinner?>
 
 <GridPane hgap="10.0" vgap="10.0" styleClass="tx-pane" stylesheets="@input.css, @transaction.css, @../script.css, @../general.css" xmlns="http://javafx.com/javafx/10.0.2-internal" xmlns:fx="http://javafx.com/fxml/1" fx:controller="com.sparrowwallet.sparrow.transaction.InputController">
     <padding>
@@ -37,7 +38,7 @@
                 <Hyperlink fx:id="linkedOutpoint" styleClass="id" visible="false" />
             </Field>
             <Field text="Spends:">
-                <CoinLabel fx:id="spends" />
+                <CopyableCoinLabel fx:id="spends" />
                 <CopyableLabel fx:id="from" text="from" />
                 <AddressLabel fx:id="address" />
             </Field>
@@ -122,7 +123,7 @@
                 <CopyableLabel fx:id="locktimeAbsolute" />
             </Field>
             <Field fx:id="locktimeRelativeField" text="Value:">
-                <Spinner fx:id="locktimeRelativeBlocks" editable="true" prefWidth="110"/>
+                <IntegerSpinner fx:id="locktimeRelativeBlocks" editable="true" prefWidth="110"/>
                 <RelativeTimelockSpinner fx:id="locktimeRelativeSeconds" editable="true" prefWidth="110"/>
                 <ComboBox fx:id="locktimeRelativeCombo">
                     <items>

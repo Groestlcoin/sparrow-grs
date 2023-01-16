@@ -1,7 +1,7 @@
 package com.sparrowwallet.sparrow.net;
 
-import com.github.arteam.simplejsonrpc.client.Transport;
 import com.google.common.net.HostAndPort;
+import com.sparrowwallet.sparrow.io.Server;
 
 import java.io.File;
 import java.io.IOException;
@@ -9,11 +9,12 @@ import java.security.KeyManagementException;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
 import java.security.cert.CertificateException;
+import java.util.Locale;
 
 public enum Protocol {
-    TCP {
+    TCP(50001) {
         @Override
-        public Transport getTransport(HostAndPort server) {
+        public CloseableTransport getTransport(HostAndPort server) {
             if(isOnionAddress(server)) {
                 return new TorTcpTransport(server);
             }
@@ -22,23 +23,24 @@ public enum Protocol {
         }
 
         @Override
-        public Transport getTransport(HostAndPort server, File serverCert) {
+        public CloseableTransport getTransport(HostAndPort server, File serverCert) {
             return getTransport(server);
         }
 
         @Override
-        public Transport getTransport(HostAndPort server, HostAndPort proxy) {
-            throw new UnsupportedOperationException("TCP protocol does not support proxying");
+        public CloseableTransport getTransport(HostAndPort server, HostAndPort proxy) {
+            //Avoid using a TorSocket if a proxy is specified, even if a .onion address
+            return new TcpTransport(server, proxy);
         }
 
         @Override
-        public Transport getTransport(HostAndPort server, File serverCert, HostAndPort proxy) {
-            throw new UnsupportedOperationException("TCP protocol does not support proxying");
+        public CloseableTransport getTransport(HostAndPort server, File serverCert, HostAndPort proxy) {
+            return getTransport(server, proxy);
         }
     },
-    SSL {
+    SSL(50002) {
         @Override
-        public Transport getTransport(HostAndPort server) throws KeyManagementException, NoSuchAlgorithmException {
+        public CloseableTransport getTransport(HostAndPort server) throws IOException, CertificateException, NoSuchAlgorithmException, KeyStoreException, KeyManagementException {
             if(isOnionAddress(server)) {
                 return new TorTcpOverTlsTransport(server);
             }
@@ -47,7 +49,7 @@ public enum Protocol {
         }
 
         @Override
-        public Transport getTransport(HostAndPort server, File serverCert) throws IOException, CertificateException, NoSuchAlgorithmException, KeyStoreException, KeyManagementException {
+        public CloseableTransport getTransport(HostAndPort server, File serverCert) throws IOException, CertificateException, NoSuchAlgorithmException, KeyStoreException, KeyManagementException {
             if(isOnionAddress(server)) {
                 return new TorTcpOverTlsTransport(server, serverCert);
             }
@@ -56,51 +58,82 @@ public enum Protocol {
         }
 
         @Override
-        public Transport getTransport(HostAndPort server, HostAndPort proxy) throws NoSuchAlgorithmException, KeyManagementException {
+        public CloseableTransport getTransport(HostAndPort server, HostAndPort proxy) throws IOException, CertificateException, NoSuchAlgorithmException, KeyStoreException, KeyManagementException {
             return new ProxyTcpOverTlsTransport(server, proxy);
         }
 
         @Override
-        public Transport getTransport(HostAndPort server, File serverCert, HostAndPort proxy) throws IOException, CertificateException, NoSuchAlgorithmException, KeyStoreException, KeyManagementException {
+        public CloseableTransport getTransport(HostAndPort server, File serverCert, HostAndPort proxy) throws IOException, CertificateException, NoSuchAlgorithmException, KeyStoreException, KeyManagementException {
             return new ProxyTcpOverTlsTransport(server, serverCert, proxy);
         }
     },
-    HTTP {
+    HTTP(80) {
         @Override
-        public Transport getTransport(HostAndPort server) throws KeyManagementException, NoSuchAlgorithmException {
+        public CloseableTransport getTransport(HostAndPort server) {
             throw new UnsupportedOperationException("No transport supported for HTTP");
         }
 
         @Override
-        public Transport getTransport(HostAndPort server, File serverCert) throws IOException, CertificateException, NoSuchAlgorithmException, KeyStoreException, KeyManagementException {
+        public CloseableTransport getTransport(HostAndPort server, File serverCert) {
             throw new UnsupportedOperationException("No transport supported for HTTP");
         }
 
         @Override
-        public Transport getTransport(HostAndPort server, HostAndPort proxy) throws IOException, CertificateException, NoSuchAlgorithmException, KeyStoreException, KeyManagementException {
+        public CloseableTransport getTransport(HostAndPort server, HostAndPort proxy) {
             throw new UnsupportedOperationException("No transport supported for HTTP");
         }
 
         @Override
-        public Transport getTransport(HostAndPort server, File serverCert, HostAndPort proxy) throws IOException, CertificateException, NoSuchAlgorithmException, KeyStoreException, KeyManagementException {
+        public CloseableTransport getTransport(HostAndPort server, File serverCert, HostAndPort proxy) {
             throw new UnsupportedOperationException("No transport supported for HTTP");
+        }
+    },
+    HTTPS(443) {
+        @Override
+        public CloseableTransport getTransport(HostAndPort server) {
+            throw new UnsupportedOperationException("No transport supported for HTTPS");
+        }
+
+        @Override
+        public CloseableTransport getTransport(HostAndPort server, File serverCert) {
+            throw new UnsupportedOperationException("No transport supported for HTTPS");
+        }
+
+        @Override
+        public CloseableTransport getTransport(HostAndPort server, HostAndPort proxy) {
+            throw new UnsupportedOperationException("No transport supported for HTTPS");
+        }
+
+        @Override
+        public CloseableTransport getTransport(HostAndPort server, File serverCert, HostAndPort proxy) {
+            throw new UnsupportedOperationException("No transport supported for HTTPS");
         }
     };
 
-    public abstract Transport getTransport(HostAndPort server) throws KeyManagementException, NoSuchAlgorithmException;
+    private final int defaultPort;
 
-    public abstract Transport getTransport(HostAndPort server, File serverCert) throws IOException, CertificateException, NoSuchAlgorithmException, KeyStoreException, KeyManagementException;
+    Protocol(int defaultPort) {
+        this.defaultPort = defaultPort;
+    }
 
-    public abstract Transport getTransport(HostAndPort server, HostAndPort proxy) throws IOException, CertificateException, NoSuchAlgorithmException, KeyStoreException, KeyManagementException;
+    public int getDefaultPort() {
+        return defaultPort;
+    }
 
-    public abstract Transport getTransport(HostAndPort server, File serverCert, HostAndPort proxy) throws IOException, CertificateException, NoSuchAlgorithmException, KeyStoreException, KeyManagementException;
+    public abstract CloseableTransport getTransport(HostAndPort server) throws IOException, CertificateException, NoSuchAlgorithmException, KeyStoreException, KeyManagementException;
+
+    public abstract CloseableTransport getTransport(HostAndPort server, File serverCert) throws IOException, CertificateException, NoSuchAlgorithmException, KeyStoreException, KeyManagementException;
+
+    public abstract CloseableTransport getTransport(HostAndPort server, HostAndPort proxy) throws IOException, CertificateException, NoSuchAlgorithmException, KeyStoreException, KeyManagementException;
+
+    public abstract CloseableTransport getTransport(HostAndPort server, File serverCert, HostAndPort proxy) throws IOException, CertificateException, NoSuchAlgorithmException, KeyStoreException, KeyManagementException;
 
     public HostAndPort getServerHostAndPort(String url) {
         return HostAndPort.fromString(url.substring(this.toUrlString().length()));
     }
 
     public String toUrlString() {
-        return toString().toLowerCase() + "://";
+        return toString().toLowerCase(Locale.ROOT) + "://";
     }
 
     public String toUrlString(String host) {
@@ -115,8 +148,31 @@ public enum Protocol {
         return toUrlString() + hostAndPort.toString();
     }
 
-    public boolean isOnionAddress(HostAndPort server) {
-        return server.getHost().toLowerCase().endsWith(".onion");
+    public static boolean isOnionHost(String host) {
+        return host != null && host.toLowerCase(Locale.ROOT).endsWith(TorService.TOR_ADDRESS_SUFFIX);
+    }
+
+    public static boolean isOnionAddress(Server server) {
+        if(server != null) {
+            return isOnionAddress(server.getHostAndPort());
+        }
+
+        return false;
+    }
+
+    public static boolean isOnionAddress(HostAndPort server) {
+        return isOnionHost(server.getHost());
+    }
+
+    public static boolean isOnionAddress(String address) {
+        if(address != null) {
+            Protocol protocol = Protocol.getProtocol(address);
+            if(protocol != null) {
+                return isOnionAddress(protocol.getServerHostAndPort(address));
+            }
+        }
+
+        return false;
     }
 
     public static Protocol getProtocol(String url) {
@@ -128,6 +184,18 @@ public enum Protocol {
         }
         if(url.startsWith("http://")) {
             return HTTP;
+        }
+        if(url.startsWith("https://")) {
+            return HTTPS;
+        }
+
+        return null;
+    }
+
+    public static String getHost(String url) {
+        Protocol protocol = getProtocol(url);
+        if(protocol != null) {
+            return protocol.getServerHostAndPort(url).getHost();
         }
 
         return null;

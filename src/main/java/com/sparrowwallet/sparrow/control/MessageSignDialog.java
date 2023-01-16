@@ -24,6 +24,7 @@ import javafx.scene.control.*;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.layout.VBox;
+import org.controlsfx.control.SegmentedButton;
 import org.controlsfx.validation.ValidationResult;
 import org.controlsfx.validation.ValidationSupport;
 import org.controlsfx.validation.decoration.StyleClassValidationDecoration;
@@ -34,7 +35,9 @@ import tornadofx.control.Fieldset;
 import tornadofx.control.Form;
 
 import java.security.SignatureException;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 
 public class MessageSignDialog extends Dialog<ButtonBar.ButtonData> {
@@ -43,8 +46,13 @@ public class MessageSignDialog extends Dialog<ButtonBar.ButtonData> {
     private final TextField address;
     private final TextArea message;
     private final TextArea signature;
+    private final ToggleGroup formatGroup;
+    private final ToggleButton formatTrezor;
+    private final ToggleButton formatElectrum;
     private final Wallet wallet;
     private WalletNode walletNode;
+    private boolean electrumSignatureFormat;
+    private boolean closed;
 
     /**
      * Verification only constructor
@@ -69,13 +77,25 @@ public class MessageSignDialog extends Dialog<ButtonBar.ButtonData> {
      * @param walletNode Wallet node to derive address from
      */
     public MessageSignDialog(Wallet wallet, WalletNode walletNode) {
+        this(wallet, walletNode, null, null);
+    }
+
+    /**
+     * Sign and verify with preset address, and supplied title, message and dialog buttons
+     *
+     * @param wallet Wallet to sign with
+     * @param walletNode Wallet node to derive address from
+     * @param title Header text of dialog
+     * @param msg Message to sign (all fields will be made uneditable)
+     * @param buttons The dialog buttons to display. If one contains the text "sign" it will trigger the signing process
+     */
+    public MessageSignDialog(Wallet wallet, WalletNode walletNode, String title, String msg, ButtonType... buttons) {
+        if(walletNode != null) {
+            checkWalletSigning(walletNode.getWallet());
+        }
+
         if(wallet != null) {
-            if(wallet.getKeystores().size() != 1) {
-                throw new IllegalArgumentException("Cannot sign messages using a wallet with multiple keystores - a single key is required");
-            }
-            if(!wallet.getKeystores().get(0).hasSeed() && wallet.getKeystores().get(0).getSource() != KeystoreSource.HW_USB) {
-                throw new IllegalArgumentException("Cannot sign messages using a wallet without a seed or USB keystore");
-            }
+            checkWalletSigning(wallet);
         }
 
         this.wallet = wallet;
@@ -83,8 +103,9 @@ public class MessageSignDialog extends Dialog<ButtonBar.ButtonData> {
 
         final DialogPane dialogPane = getDialogPane();
         dialogPane.getStylesheets().add(AppServices.class.getResource("general.css").toExternalForm());
+        dialogPane.getStylesheets().add(AppServices.class.getResource("dialog.css").toExternalForm());
         AppServices.setStageIcon(dialogPane.getScene().getWindow());
-        dialogPane.setHeaderText(wallet == null ? "Verify Message" : "Sign/Verify Message");
+        dialogPane.setHeaderText(title == null ? (wallet == null ? "Verify Message" : "Sign/Verify Message") : title);
 
         Image image = new Image("image/seed.png", 50, 50, false, false);
         if (!image.isError()) {
@@ -100,16 +121,18 @@ public class MessageSignDialog extends Dialog<ButtonBar.ButtonData> {
         Form form = new Form();
         Fieldset fieldset = new Fieldset();
         fieldset.setText("");
+        fieldset.setSpacing(10);
 
         Field addressField = new Field();
         addressField.setText("Address:");
         address = new TextField();
         address.getStyleClass().add("id");
         address.setEditable(walletNode == null);
+        address.setTooltip(new Tooltip("Only Legacy (P2PKH), Nested Segwit (P2SH-P2WPKH) and Native Segwit (P2WPKH) singlesig addresses can sign"));
         addressField.getInputs().add(address);
 
         if(walletNode != null) {
-            address.setText(wallet.getAddress(walletNode).toString());
+            address.setText(walletNode.getAddress().toString());
         }
 
         Field messageField = new Field();
@@ -129,51 +152,90 @@ public class MessageSignDialog extends Dialog<ButtonBar.ButtonData> {
         signature.setWrapText(true);
         signatureField.getInputs().add(signature);
 
-        fieldset.getChildren().addAll(addressField, messageField, signatureField);
+        Field formatField = new Field();
+        formatField.setText("Format:");
+        formatGroup = new ToggleGroup();
+        formatElectrum = new ToggleButton("Standard (Electrum-GRS)");
+        formatTrezor = new ToggleButton("BIP137 (Trezor)");
+        SegmentedButton formatButtons = new SegmentedButton(formatElectrum, formatTrezor);
+        formatButtons.setToggleGroup(formatGroup);
+        formatField.getInputs().add(formatButtons);
+
+        formatGroup.selectedToggleProperty().addListener((observable, oldValue, newValue) -> {
+            electrumSignatureFormat = (newValue == formatElectrum);
+        });
+
+        formatButtons.setDisable(wallet != null && walletNode != null && wallet.getScriptType() == ScriptType.P2PKH);
+
+        fieldset.getChildren().addAll(addressField, messageField, signatureField, formatField);
         form.getChildren().add(fieldset);
         dialogPane.setContent(form);
 
+        if(msg != null) {
+            message.setText(msg);
+            address.setEditable(false);
+            message.setEditable(false);
+            signature.setEditable(false);
+            formatButtons.setDisable(true);
+        }
+
         ButtonType signButtonType = new javafx.scene.control.ButtonType("Sign", ButtonBar.ButtonData.BACK_PREVIOUS);
         ButtonType verifyButtonType = new javafx.scene.control.ButtonType("Verify", ButtonBar.ButtonData.NEXT_FORWARD);
-        ButtonType doneButtonType = new javafx.scene.control.ButtonType("Done", ButtonBar.ButtonData.OK_DONE);
-        dialogPane.getButtonTypes().addAll(signButtonType, verifyButtonType, doneButtonType);
+        ButtonType doneButtonType = new javafx.scene.control.ButtonType("Done", ButtonBar.ButtonData.CANCEL_CLOSE);
 
-        Button signButton = (Button)dialogPane.lookupButton(signButtonType);
-        signButton.setDisable(wallet == null);
-        signButton.setOnAction(event -> {
-            signMessage();
-        });
+        if(buttons.length > 0) {
+            dialogPane.getButtonTypes().addAll(buttons);
 
-        Button verifyButton = (Button)dialogPane.lookupButton(verifyButtonType);
-        verifyButton.setDefaultButton(false);
-        verifyButton.setOnAction(event -> {
-            verifyMessage();
-        });
-
-        boolean validAddress = isValidAddress();
-        signButton.setDisable(!validAddress || (wallet == null));
-        verifyButton.setDisable(!validAddress);
-
-        ValidationSupport validationSupport = new ValidationSupport();
-        Platform.runLater(() -> {
-            validationSupport.registerValidator(address, (Control c, String newValue) -> ValidationResult.fromErrorIf(c, "Invalid address", !isValidAddress()));
-            validationSupport.setValidationDecorator(new StyleClassValidationDecoration());
-        });
-
-        address.textProperty().addListener((observable, oldValue, newValue) -> {
-            boolean valid = isValidAddress();
-            signButton.setDisable(!valid || (wallet == null));
-            verifyButton.setDisable(!valid);
-
-            if(valid && wallet != null) {
-                try {
-                    Address address = getAddress();
-                    setWalletNodeFromAddress(wallet, address);
-                } catch(InvalidAddressException e) {
-                    //can't happen
-                }
+            ButtonType customSignButtonType = Arrays.stream(buttons).filter(buttonType -> buttonType.getText().toLowerCase(Locale.ROOT).contains("sign")).findFirst().orElse(null);
+            if(customSignButtonType != null) {
+                Button customSignButton = (Button)dialogPane.lookupButton(customSignButtonType);
+                customSignButton.setDefaultButton(true);
+                customSignButton.setOnAction(event -> {
+                    customSignButton.setDisable(true);
+                    signMessage();
+                    setResult(ButtonBar.ButtonData.OK_DONE);
+                });
             }
-        });
+        } else {
+            dialogPane.getButtonTypes().addAll(signButtonType, verifyButtonType, doneButtonType);
+
+            Button signButton = (Button) dialogPane.lookupButton(signButtonType);
+            signButton.setDisable(wallet == null);
+            signButton.setOnAction(event -> {
+                signMessage();
+            });
+
+            Button verifyButton = (Button) dialogPane.lookupButton(verifyButtonType);
+            verifyButton.setDefaultButton(false);
+            verifyButton.setOnAction(event -> {
+                verifyMessage();
+            });
+
+            boolean validAddress = isValidAddress();
+            signButton.setDisable(!validAddress || (wallet == null));
+            verifyButton.setDisable(!validAddress);
+
+            ValidationSupport validationSupport = new ValidationSupport();
+            Platform.runLater(() -> {
+                validationSupport.setValidationDecorator(new StyleClassValidationDecoration());
+                validationSupport.registerValidator(address, (Control c, String newValue) -> ValidationResult.fromErrorIf(c, "Invalid address", !isValidAddress()));
+            });
+
+            address.textProperty().addListener((observable, oldValue, newValue) -> {
+                boolean valid = isValidAddress();
+                signButton.setDisable(!valid || (wallet == null));
+                verifyButton.setDisable(!valid);
+
+                if(valid && wallet != null) {
+                    try {
+                        Address address = getAddress();
+                        setWalletNodeFromAddress(wallet, address);
+                    } catch(InvalidAddressException e) {
+                        //can't happen
+                    }
+                }
+            });
+        }
 
         EventManager.get().register(this);
         setOnCloseRequest(event -> {
@@ -182,20 +244,58 @@ public class MessageSignDialog extends Dialog<ButtonBar.ButtonData> {
                 return;
             }
 
-            EventManager.get().unregister(this);
+            if(!closed) {
+                EventManager.get().unregister(this);
+                closed = true;
+            }
         });
 
-        setResultConverter(dialogButton -> dialogButton == signButtonType || dialogButton == verifyButtonType ? ButtonBar.ButtonData.APPLY : ButtonBar.ButtonData.OK_DONE);
+        AppServices.onEscapePressed(dialogPane.getScene(), () -> setResult(ButtonBar.ButtonData.CANCEL_CLOSE));
+        AppServices.moveToActiveWindowScreen(this);
+        setResultConverter(dialogButton -> dialogButton == signButtonType || dialogButton == verifyButtonType ? ButtonBar.ButtonData.APPLY : dialogButton.getButtonData());
+
+        Platform.runLater(() -> {
+            if(address.getText().isEmpty()) {
+                address.requestFocus();
+            } else if(message.getText().isEmpty()) {
+                message.requestFocus();
+            }
+
+            formatGroup.selectToggle(formatElectrum);
+        });
+    }
+
+    private void checkWalletSigning(Wallet wallet) {
+        if(wallet.getKeystores().size() != 1) {
+            throw new IllegalArgumentException("Cannot sign messages using a wallet with multiple keystores - a single key is required");
+        }
+        if(!wallet.getKeystores().get(0).hasPrivateKey() && wallet.getKeystores().get(0).getSource() != KeystoreSource.HW_USB) {
+            throw new IllegalArgumentException("Cannot sign messages using a wallet without private keys or a USB keystore");
+        }
     }
 
     private Address getAddress()throws InvalidAddressException {
         return Address.fromString(address.getText());
     }
 
+    public String getSignature() {
+        return signature.getText();
+    }
+
+    /**
+     * Use the Electrum signing format, which uses the non-segwit compressed signing parameters for both segwit types (p2sh-p2wpkh and p2wpkh)
+     *
+     * @param electrumSignatureFormat
+     */
+    public void setElectrumSignatureFormat(boolean electrumSignatureFormat) {
+        formatGroup.selectToggle(electrumSignatureFormat ? formatElectrum : formatTrezor);
+        this.electrumSignatureFormat = electrumSignatureFormat;
+    }
+
     private boolean isValidAddress() {
         try {
-            getAddress();
-            return true;
+            Address address = getAddress();
+            return address.getScriptType() != ScriptType.P2TR && (address.getScriptType().isAllowed(PolicyType.SINGLE) || address.getScriptType() == ScriptType.P2SH);
         } catch (InvalidAddressException e) {
             return false;
         }
@@ -211,25 +311,28 @@ public class MessageSignDialog extends Dialog<ButtonBar.ButtonData> {
             return;
         }
 
-        if(wallet.containsSeeds()) {
-            if(wallet.isEncrypted()) {
+        //Note we can expect a single keystore due to the check in the constructor
+        Wallet signingWallet = walletNode.getWallet();
+        if(signingWallet.getKeystores().get(0).hasPrivateKey()) {
+            if(signingWallet.isEncrypted()) {
                 EventManager.get().post(new RequestOpenWalletsEvent());
             } else {
-                signUnencryptedKeystore(wallet);
+                signUnencryptedKeystore(signingWallet);
             }
-        } else if(wallet.containsSource(KeystoreSource.HW_USB)) {
-            signUsbKeystore(wallet);
+        } else if(signingWallet.containsSource(KeystoreSource.HW_USB)) {
+            signUsbKeystore(signingWallet);
         }
     }
 
     private void signUnencryptedKeystore(Wallet decryptedWallet) {
         try {
-            //Note we can expect a single keystore due to the check above
             Keystore keystore = decryptedWallet.getKeystores().get(0);
             ECKey privKey = keystore.getKey(walletNode);
-            String signatureText = privKey.signMessage(message.getText().trim(), decryptedWallet.getScriptType(), null);
+            ScriptType scriptType = electrumSignatureFormat ? ScriptType.P2PKH : decryptedWallet.getScriptType();
+            String signatureText = privKey.signMessage(message.getText().trim(), scriptType);
             signature.clear();
             signature.appendText(signatureText);
+            privKey.clear();
         } catch(Exception e) {
             log.error("Could not sign message", e);
             AppServices.showErrorDialog("Could not sign message", e.getMessage());
@@ -269,14 +372,9 @@ public class MessageSignDialog extends Dialog<ButtonBar.ButtonData> {
             }
 
             if(verified) {
-                Alert alert = new Alert(Alert.AlertType.INFORMATION);
-                AppServices.setStageIcon(alert.getDialogPane().getScene().getWindow());
-                alert.setTitle("Verification Succeeded");
-                alert.setHeaderText("Verification Succeeded");
-                alert.setContentText("The signature verified against the message.");
-                alert.showAndWait();
+                AppServices.showSuccessDialog("Verification Succeeded", "The signature verified against the message.");
             } else {
-                AppServices.showErrorDialog("Verification failed", "The provided signature did not match the message for this address.");
+                AppServices.showErrorDialog("Verification Failed", "The provided signature did not match the message for this address.");
             }
         } catch(IllegalArgumentException e) {
             AppServices.showErrorDialog("Could not verify message", e.getMessage());
@@ -308,20 +406,21 @@ public class MessageSignDialog extends Dialog<ButtonBar.ButtonData> {
             return;
         }
 
-        WalletPasswordDialog dlg = new WalletPasswordDialog(WalletPasswordDialog.PasswordRequirement.LOAD);
+        WalletPasswordDialog dlg = new WalletPasswordDialog(wallet.getMasterName(), WalletPasswordDialog.PasswordRequirement.LOAD);
         Optional<SecureString> password = dlg.showAndWait();
         if(password.isPresent()) {
-            Storage.DecryptWalletService decryptWalletService = new Storage.DecryptWalletService(wallet.copy(), password.get());
+            Storage.DecryptWalletService decryptWalletService = new Storage.DecryptWalletService(walletNode.getWallet().copy(), password.get());
             decryptWalletService.setOnSucceeded(workerStateEvent -> {
-                EventManager.get().post(new StorageEvent(storage.getWalletFile(), TimedEvent.Action.END, "Done"));
+                EventManager.get().post(new StorageEvent(storage.getWalletId(wallet), TimedEvent.Action.END, "Done"));
                 Wallet decryptedWallet = decryptWalletService.getValue();
                 signUnencryptedKeystore(decryptedWallet);
+                decryptedWallet.clearPrivate();
             });
             decryptWalletService.setOnFailed(workerStateEvent -> {
-                EventManager.get().post(new StorageEvent(storage.getWalletFile(), TimedEvent.Action.END, "Failed"));
+                EventManager.get().post(new StorageEvent(storage.getWalletId(wallet), TimedEvent.Action.END, "Failed"));
                 AppServices.showErrorDialog("Incorrect Password", decryptWalletService.getException().getMessage());
             });
-            EventManager.get().post(new StorageEvent(storage.getWalletFile(), TimedEvent.Action.START, "Decrypting wallet..."));
+            EventManager.get().post(new StorageEvent(storage.getWalletId(wallet), TimedEvent.Action.START, "Decrypting wallet..."));
             decryptWalletService.start();
         }
     }

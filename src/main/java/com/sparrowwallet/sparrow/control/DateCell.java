@@ -7,6 +7,7 @@ import javafx.geometry.Pos;
 import javafx.scene.control.*;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
+import javafx.util.Duration;
 
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
@@ -34,14 +35,19 @@ public class DateCell extends TreeTableCell<Entry, Entry> {
             if(entry instanceof UtxoEntry) {
                 UtxoEntry utxoEntry = (UtxoEntry)entry;
                 if(utxoEntry.getHashIndex().getHeight() <= 0) {
-                    setText("Unconfirmed " + (utxoEntry.isSpendable() ? "(Spendable)" : "(Not yet spendable)"));
-                } else {
+                    setText("Unconfirmed " + (utxoEntry.getHashIndex().getHeight() < 0 ? "Parent " : "") + (utxoEntry.getWallet().isWhirlpoolMixWallet() ? "(Not yet mixable)" : (utxoEntry.isSpendable() ? "(Spendable)" : "(Not yet spendable)")));
+                    setContextMenu(null);
+                } else if(utxoEntry.getHashIndex().getDate() != null) {
                     String date = DATE_FORMAT.format(utxoEntry.getHashIndex().getDate());
                     setText(date);
                     setContextMenu(new DateContextMenu(date, utxoEntry.getHashIndex()));
+                } else {
+                    setText("Unknown");
+                    setContextMenu(null);
                 }
 
                 Tooltip tooltip = new Tooltip();
+                tooltip.setShowDelay(Duration.millis(250));
                 int height = utxoEntry.getHashIndex().getHeight();
                 tooltip.setText(height > 0 ? Integer.toString(height) : "Mempool");
                 setTooltip(tooltip);

@@ -1,18 +1,17 @@
 package com.sparrowwallet.sparrow.control;
 
-import com.sparrowwallet.drongo.wallet.WalletNode;
 import com.sparrowwallet.sparrow.wallet.*;
 import javafx.beans.property.ReadOnlyObjectWrapper;
 import javafx.scene.control.SelectionMode;
 import javafx.scene.control.TreeTableColumn;
 import javafx.scene.control.TreeTableView;
 
-import java.util.List;
+import java.util.Comparator;
 
 public class UtxosTreeTable extends CoinTreeTable {
     public void initialize(WalletUtxosEntry rootEntry) {
         getStyleClass().add("utxos-treetable");
-        setBitcoinUnit(rootEntry.getWallet());
+        setUnitFormat(rootEntry.getWallet());
 
         updateAll(rootEntry);
         setShowRoot(false);
@@ -23,6 +22,7 @@ public class UtxosTreeTable extends CoinTreeTable {
         });
         dateCol.setCellFactory(p -> new DateCell());
         dateCol.setSortable(true);
+        dateCol.setComparator(dateCol.getComparator().reversed());
         getColumns().add(dateCol);
 
         TreeTableColumn<Entry, Entry> outputCol = new TreeTableColumn<>("Output");
@@ -34,22 +34,34 @@ public class UtxosTreeTable extends CoinTreeTable {
         outputCol.setComparator((o1, o2) -> {
             UtxoEntry entry1 = (UtxoEntry)o1;
             UtxoEntry entry2 = (UtxoEntry)o2;
-            return entry1.getDescription().compareTo(entry2.getDescription());
+            int hashCompare = entry1.getHashIndex().getHash().toString().compareTo(entry2.getHashIndex().getHash().toString());
+            if(hashCompare != 0) {
+                return hashCompare;
+            }
+
+            return (int)(entry1.getHashIndex().getIndex() - entry2.getHashIndex().getIndex());
         });
         getColumns().add(outputCol);
 
-        TreeTableColumn<Entry, Entry> addressCol = new TreeTableColumn<>("Address");
-        addressCol.setCellValueFactory((TreeTableColumn.CellDataFeatures<Entry, Entry> param) -> {
-            return new ReadOnlyObjectWrapper<>(param.getValue().getValue());
-        });
-        addressCol.setCellFactory(p -> new AddressCell());
-        addressCol.setSortable(true);
-        addressCol.setComparator((o1, o2) -> {
-            UtxoEntry entry1 = (UtxoEntry)o1;
-            UtxoEntry entry2 = (UtxoEntry)o2;
-            return entry1.getAddress().toString().compareTo(entry2.getAddress().toString());
-        });
-        getColumns().add(addressCol);
+        if(rootEntry.getWallet().isWhirlpoolMixWallet()) {
+            TreeTableColumn<Entry, UtxoEntry.MixStatus> mixStatusCol = new TreeTableColumn<>("Mixes");
+            mixStatusCol.setCellValueFactory((TreeTableColumn.CellDataFeatures<Entry, UtxoEntry.MixStatus> param) -> {
+                return ((UtxoEntry)param.getValue().getValue()).mixStatusProperty();
+            });
+            mixStatusCol.setCellFactory(p -> new MixStatusCell());
+            mixStatusCol.setSortable(true);
+            mixStatusCol.setComparator(Comparator.comparingInt(UtxoEntry.MixStatus::getMixesDone));
+            getColumns().add(mixStatusCol);
+        } else {
+            TreeTableColumn<Entry, UtxoEntry.AddressStatus> addressCol = new TreeTableColumn<>("Address");
+            addressCol.setCellValueFactory((TreeTableColumn.CellDataFeatures<Entry, UtxoEntry.AddressStatus> param) -> {
+                return ((UtxoEntry)param.getValue().getValue()).addressStatusProperty();
+            });
+            addressCol.setCellFactory(p -> new AddressCell());
+            addressCol.setSortable(true);
+            addressCol.setComparator(Comparator.comparing(o -> o.getAddress().toString()));
+            getColumns().add(addressCol);
+        }
 
         TreeTableColumn<Entry, String> labelCol = new TreeTableColumn<>("Label");
         labelCol.setCellValueFactory((TreeTableColumn.CellDataFeatures<Entry, String> param) -> {
@@ -78,7 +90,7 @@ public class UtxosTreeTable extends CoinTreeTable {
     }
 
     public void updateAll(WalletUtxosEntry rootEntry) {
-        setBitcoinUnit(rootEntry.getWallet());
+        setUnitFormat(rootEntry.getWallet());
 
         RecursiveTreeItem<Entry> rootItem = new RecursiveTreeItem<>(rootEntry, Entry::getChildren);
         setRoot(rootItem);
@@ -91,9 +103,11 @@ public class UtxosTreeTable extends CoinTreeTable {
         }
     }
 
-    public void updateHistory(List<WalletNode> updatedNodes) {
+    public void updateHistory() {
         //Utxo entries should have already been updated, so only a resort required
-        sort();
+        if(!getRoot().getChildren().isEmpty()) {
+            sort();
+        }
     }
 
     public void updateLabel(Entry entry) {

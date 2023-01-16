@@ -7,14 +7,15 @@ import com.sparrowwallet.drongo.wallet.Keystore;
 import com.sparrowwallet.drongo.wallet.KeystoreSource;
 import com.sparrowwallet.drongo.wallet.Wallet;
 import com.sparrowwallet.drongo.wallet.WalletModel;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
+import java.io.*;
 import java.nio.charset.StandardCharsets;
 
-public class SpecterDIY implements KeystoreFileImport {
+public class SpecterDIY implements KeystoreFileImport, WalletExport {
+    private static final Logger log = LoggerFactory.getLogger(SpecterDIY.class);
+
     @Override
     public Keystore getKeystore(ScriptType scriptType, InputStream inputStream, String password) throws ImportException {
         try {
@@ -29,12 +30,12 @@ public class SpecterDIY implements KeystoreFileImport {
 
             Keystore keystore = wallet.getKeystores().get(0);
             keystore.setLabel(getName());
-            keystore.setWalletModel(WalletModel.SPECTER_DIY);
+            keystore.setWalletModel(getWalletModel());
             keystore.setSource(KeystoreSource.HW_AIRGAPPED);
 
             return keystore;
         } catch(IOException e) {
-            throw new ImportException(e);
+            throw new ImportException("Error getting " + getName() + " keystore", e);
         }
     }
 
@@ -44,7 +45,7 @@ public class SpecterDIY implements KeystoreFileImport {
     }
 
     @Override
-    public String getKeystoreImportDescription() {
+    public String getKeystoreImportDescription(int account) {
         return "Import file or QR created by using the Master Public Keys feature on your Specter DIY device. Note the default is P2WPKH for Single Signature, and P2WSH for Multi Signature.";
     }
 
@@ -61,5 +62,37 @@ public class SpecterDIY implements KeystoreFileImport {
     @Override
     public WalletModel getWalletModel() {
         return WalletModel.SPECTER_DIY;
+    }
+
+    @Override
+    public void exportWallet(Wallet wallet, OutputStream outputStream) throws ExportException {
+        try {
+            BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(outputStream, StandardCharsets.UTF_8));
+            writer.append("addwallet ").append(wallet.getFullName()).append("&").append(OutputDescriptor.getOutputDescriptor(wallet).toString().replace('\'', 'h')).append("\n");
+            writer.flush();
+        } catch(Exception e) {
+            log.error("Error exporting " + getName() + " wallet", e);
+            throw new ExportException("Error exporting " + getName() + " wallet", e);
+        }
+    }
+
+    @Override
+    public String getWalletExportDescription() {
+        return "Export file or QR that can be read by your Specter DIY using the Wallets > Add Wallet feature.";
+    }
+
+    @Override
+    public String getExportFileExtension(Wallet wallet) {
+        return "txt";
+    }
+
+    @Override
+    public boolean isWalletExportScannable() {
+        return true;
+    }
+
+    @Override
+    public boolean walletExportRequiresDecryption() {
+        return false;
     }
 }

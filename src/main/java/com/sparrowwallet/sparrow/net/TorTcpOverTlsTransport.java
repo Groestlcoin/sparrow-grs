@@ -17,7 +17,7 @@ import java.security.cert.CertificateException;
 public class TorTcpOverTlsTransport extends TcpOverTlsTransport {
     private static final Logger log = LoggerFactory.getLogger(TorTcpOverTlsTransport.class);
 
-    public TorTcpOverTlsTransport(HostAndPort server) throws NoSuchAlgorithmException, KeyManagementException {
+    public TorTcpOverTlsTransport(HostAndPort server) throws IOException, CertificateException, NoSuchAlgorithmException, KeyStoreException, KeyManagementException {
         super(server);
     }
 
@@ -26,9 +26,10 @@ public class TorTcpOverTlsTransport extends TcpOverTlsTransport {
     }
 
     @Override
-    protected Socket createSocket() throws IOException {
+    protected void createSocket() throws IOException {
         TorTcpTransport torTcpTransport = new TorTcpTransport(server);
-        Socket socket = torTcpTransport.createSocket();
+        torTcpTransport.createSocket();
+        socket = torTcpTransport.socket;
 
         try {
             Field socketField = socket.getClass().getDeclaredField("socket");
@@ -41,9 +42,7 @@ public class TorTcpOverTlsTransport extends TcpOverTlsTransport {
             log.error("Could not set socket connected status", e);
         }
 
-        SSLSocket sslSocket = (SSLSocket) sslSocketFactory.createSocket(socket, server.getHost(), server.getPortOrDefault(DEFAULT_PORT), true);
-        sslSocket.startHandshake();
-
-        return sslSocket;
+        socket = sslSocketFactory.createSocket(socket, server.getHost(), server.getPortOrDefault(Protocol.SSL.getDefaultPort()), true);
+        startHandshake((SSLSocket)socket);
     }
 }

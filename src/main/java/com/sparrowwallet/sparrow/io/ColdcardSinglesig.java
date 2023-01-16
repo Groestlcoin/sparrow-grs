@@ -9,23 +9,28 @@ import com.sparrowwallet.drongo.policy.Policy;
 import com.sparrowwallet.drongo.policy.PolicyType;
 import com.sparrowwallet.drongo.protocol.ScriptType;
 import com.sparrowwallet.drongo.wallet.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.lang.reflect.Type;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 import java.util.Map;
 
 public class ColdcardSinglesig implements KeystoreFileImport, WalletImport {
+    private static final Logger log = LoggerFactory.getLogger(ColdcardSinglesig.class);
+
     @Override
     public String getName() {
         return "Coldcard";
     }
 
     @Override
-    public String getKeystoreImportDescription() {
-        return "Import file created by using the Advanced > MicroSD > Export Wallet > Generic JSON feature on your Coldcard. Note this requires firmware version 3.1.3 or later.";
+    public String getKeystoreImportDescription(int account) {
+        return "Import file created by using the Advanced > MicroSD > Export Wallet > Generic JSON > " + account + " feature on your Coldcard. Note this requires firmware version 3.1.3 or later.";
     }
 
     @Override
@@ -67,7 +72,7 @@ public class ColdcardSinglesig implements KeystoreFileImport, WalletImport {
                     ColdcardKeystore ck = gson.fromJson(map.get(key), ColdcardKeystore.class);
 
                     if(ck.name != null) {
-                        ScriptType ckScriptType = ScriptType.valueOf(ck.name.replace("p2wpkh-p2sh", "p2sh_p2wpkh").replace("p2sh-p2wpkh", "p2sh_p2wpkh").toUpperCase());
+                        ScriptType ckScriptType = ScriptType.valueOf(ck.name.replace("p2wpkh-p2sh", "p2sh_p2wpkh").replace("p2sh-p2wpkh", "p2sh_p2wpkh").toUpperCase(Locale.ROOT));
                         if(ckScriptType.equals(scriptType)) {
                             Keystore keystore = new Keystore();
                             keystore.setLabel(getName());
@@ -82,7 +87,7 @@ public class ColdcardSinglesig implements KeystoreFileImport, WalletImport {
                 }
             }
         } catch (Exception e) {
-            throw new ImportException(e);
+            throw new ImportException("Error getting " + getName() + " keystore", e);
         }
 
         throw new ImportException("Correct derivation not found for script type: " + scriptType);

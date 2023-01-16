@@ -13,6 +13,7 @@
 <?import org.fxmisc.flowless.VirtualizedScrollPane?>
 <?import org.controlsfx.glyphfont.Glyph?>
 
+<?import com.sparrowwallet.sparrow.control.HelpLabel?>
 <BorderPane stylesheets="@settings.css, @wallet.css, @../script.css, @../descriptor.css, @../general.css" styleClass="wallet-pane" xmlns="http://javafx.com/javafx/10.0.2-internal" xmlns:fx="http://javafx.com/fxml/1" fx:controller="com.sparrowwallet.sparrow.wallet.SettingsController">
     <center>
         <GridPane hgap="10.0" vgap="10.0">
@@ -40,6 +41,7 @@
                                 </FXCollections>
                             </items>
                         </ComboBox>
+                        <HelpLabel helpText="Single signature wallets use a single keystore (hardware wallet or seed).\nMultisignature wallets require multiple keystores (N), of which a certain number (M) need to sign." />
                     </Field>
                     <Field text="Script Type:">
                         <ComboBox fx:id="scriptType">
@@ -55,6 +57,7 @@
                                 </FXCollections>
                             </items>
                         </ComboBox>
+                        <HelpLabel helpText="Native Segwit types are the default and are usually the best choice.\nNested Segwit types are a good choice for the widest compatibility with older wallets.\nLegacy types should be avoided, unless configuring an old wallet." />
                     </Field>
                 </Fieldset>
             </Form>
@@ -80,7 +83,7 @@
                                 <DescriptorArea fx:id="descriptor" editable="false" styleClass="uneditable-codearea" prefHeight="27" maxHeight="27" />
                             </content>
                         </VirtualizedScrollPane>
-                        <Button onAction="#scanDescriptorQR">
+                        <Button fx:id="scanDescriptorQR" onAction="#scanDescriptorQR">
                             <graphic>
                                 <Glyph fontFamily="Font Awesome 5 Free Solid" fontSize="12" icon="CAMERA" />
                             </graphic>
@@ -88,7 +91,16 @@
                                 <Tooltip text="Scan a QR code" />
                             </tooltip>
                         </Button>
-                        <Button text="Edit..." onAction="#editDescriptor" />
+                        <Button fx:id="showDescriptorQR" onAction="#showDescriptorQR">
+                            <graphic>
+                                <Glyph fontFamily="Font Awesome 5 Free Solid" fontSize="12" icon="QRCODE" />
+                            </graphic>
+                            <tooltip>
+                                <Tooltip text="Show as QR code" />
+                            </tooltip>
+                        </Button>
+                        <Button fx:id="editDescriptor" text="Edit..." onAction="#editDescriptor" />
+                        <Button fx:id="showDescriptor" text="Show..." onAction="#showDescriptor" />
                     </Field>
                 </Fieldset>
             </Form>
@@ -109,6 +121,10 @@
             <padding>
                 <Insets left="25.0" right="25.0" bottom="25.0" />
             </padding>
+            <HBox AnchorPane.leftAnchor="0" spacing="20">
+                <Button fx:id="export" text="Export..." onAction="#exportWallet" />
+                <Button fx:id="addAccount" text="Add Account..." onAction="#addAccount" />
+            </HBox>
             <HBox AnchorPane.rightAnchor="10" spacing="20">
                 <Button text="Advanced..." onAction="#showAdvanced" />
                 <Button fx:id="revert" text="Revert" cancelButton="true" />

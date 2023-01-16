@@ -1,31 +1,46 @@
 package com.sparrowwallet.sparrow.control;
 
+import com.sparrowwallet.drongo.KeyPurpose;
 import com.sparrowwallet.drongo.Utils;
 import com.sparrowwallet.drongo.address.Address;
-import com.sparrowwallet.drongo.protocol.Transaction;
-import com.sparrowwallet.drongo.protocol.TransactionOutput;
+import com.sparrowwallet.drongo.protocol.*;
 import com.sparrowwallet.drongo.wallet.*;
 import com.sparrowwallet.sparrow.AppServices;
 import com.sparrowwallet.sparrow.EventManager;
 import com.sparrowwallet.sparrow.event.*;
 import com.sparrowwallet.sparrow.glyphfont.FontAwesome5;
+import com.sparrowwallet.sparrow.io.Config;
 import com.sparrowwallet.sparrow.wallet.*;
 import javafx.application.Platform;
+import javafx.beans.property.IntegerProperty;
+import javafx.beans.property.SimpleIntegerProperty;
 import javafx.geometry.Pos;
 import javafx.scene.control.*;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.HBox;
+import javafx.util.Duration;
 import org.controlsfx.glyphfont.FontAwesome;
 import org.controlsfx.glyphfont.Glyph;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-class EntryCell extends TreeTableCell<Entry, Entry> {
-    private static final DateFormat DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd HH:mm");
+public class EntryCell extends TreeTableCell<Entry, Entry> implements ConfirmationsListener {
+    private static final Logger log = LoggerFactory.getLogger(EntryCell.class);
+
+    public static final DateFormat DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd HH:mm");
+    private static final Pattern REPLACED_BY_FEE_SUFFIX = Pattern.compile("(.*)\\(Replaced By Fee( #)?(\\d+)?\\).*");
+
+    private static EntryCell lastCell;
+
+    private IntegerProperty confirmationsProperty;
 
     public EntryCell() {
         super();
@@ -37,6 +52,12 @@ class EntryCell extends TreeTableCell<Entry, Entry> {
     @Override
     protected void updateItem(Entry entry, boolean empty) {
         super.updateItem(entry, empty);
+
+        //Return immediately to avoid CPU usage when updating the same invisible cell to determine tableview size (see https://bugs.openjdk.org/browse/JDK-8280442)
+        if(this == lastCell && !getTableRow().isVisible()) {
+            return;
+        }
+        lastCell = this;
 
         applyRowStyles(this, entry);
 
@@ -59,29 +80,43 @@ class EntryCell extends TreeTableCell<Entry, Entry> {
                 }
 
                 Tooltip tooltip = new Tooltip();
-                tooltip.setText(transactionEntry.getBlockTransaction().getHash().toString());
+                tooltip.setShowDelay(Duration.millis(250));
+                tooltip.setText(getTooltip(transactionEntry));
                 setTooltip(tooltip);
 
+                if(transactionEntry.getBlockTransaction().getHeight() <= 0) {
+                    tooltip.setOnShowing(event -> {
+                        tooltip.setText(getTooltip(transactionEntry));
+                    });
+                }
+
                 HBox actionBox = new HBox();
+                actionBox.getStyleClass().add("cell-actions");
                 Button viewTransactionButton = new Button("");
-                Glyph searchGlyph = new Glyph(FontAwesome5.FONT_NAME, FontAwesome5.Glyph.SEARCH);
-                searchGlyph.setFontSize(12);
-                viewTransactionButton.setGraphic(searchGlyph);
+                viewTransactionButton.setGraphic(getViewTransactionGlyph());
                 viewTransactionButton.setOnAction(event -> {
                     EventManager.get().post(new ViewTransactionEvent(this.getScene().getWindow(), transactionEntry.getBlockTransaction()));
                 });
                 actionBox.getChildren().add(viewTransactionButton);
 
                 BlockTransaction blockTransaction = transactionEntry.getBlockTransaction();
-                if(blockTransaction.getHeight() <= 0 && blockTransaction.getTransaction().isReplaceByFee() && transactionEntry.getWallet().allInputsFromWallet(blockTransaction.getHash())) {
+                if(blockTransaction.getHeight() <= 0 && blockTransaction.getTransaction().isReplaceByFee() &&
+                        Config.get().isIncludeMempoolOutputs() && transactionEntry.getWallet().allInputsFromWallet(blockTransaction.getHash())) {
                     Button increaseFeeButton = new Button("");
-                    Glyph increaseFeeGlyph = new Glyph(FontAwesome5.FONT_NAME, FontAwesome5.Glyph.HAND_HOLDING_MEDICAL);
-                    increaseFeeGlyph.setFontSize(12);
-                    increaseFeeButton.setGraphic(increaseFeeGlyph);
+                    increaseFeeButton.setGraphic(getIncreaseFeeRBFGlyph());
                     increaseFeeButton.setOnAction(event -> {
-                        increaseFee(transactionEntry);
+                        increaseFee(transactionEntry, false);
                     });
                     actionBox.getChildren().add(increaseFeeButton);
+                }
+
+                if(blockTransaction.getHeight() <= 0 && containsWalletOutputs(transactionEntry)) {
+                    Button cpfpButton = new Button("");
+                    cpfpButton.setGraphic(getIncreaseFeeCPFPGlyph());
+                    cpfpButton.setOnAction(event -> {
+                        createCpfp(transactionEntry);
+                    });
+                    actionBox.getChildren().add(cpfpButton);
                 }
 
                 setGraphic(actionBox);
@@ -89,51 +124,56 @@ class EntryCell extends TreeTableCell<Entry, Entry> {
                 NodeEntry nodeEntry = (NodeEntry)entry;
                 Address address = nodeEntry.getAddress();
                 setText(address.toString());
-                setContextMenu(new AddressContextMenu(address, nodeEntry.getOutputDescriptor(), null));
+                setContextMenu(new AddressContextMenu(address, nodeEntry.getOutputDescriptor(), nodeEntry, true));
                 Tooltip tooltip = new Tooltip();
-                tooltip.setText(nodeEntry.getNode().getDerivationPath().replace("m", ".."));
+                tooltip.setShowDelay(Duration.millis(250));
+                tooltip.setText(nodeEntry.getNode().toString());
                 setTooltip(tooltip);
                 getStyleClass().add("address-cell");
 
                 HBox actionBox = new HBox();
-                Button receiveButton = new Button("");
-                Glyph receiveGlyph = new Glyph("FontAwesome", FontAwesome.Glyph.ARROW_DOWN);
-                receiveGlyph.setFontSize(12);
-                receiveButton.setGraphic(receiveGlyph);
-                receiveButton.setOnAction(event -> {
-                    EventManager.get().post(new ReceiveActionEvent(nodeEntry));
-                    Platform.runLater(() -> EventManager.get().post(new ReceiveToEvent(nodeEntry)));
-                });
-                actionBox.getChildren().add(receiveButton);
+                actionBox.getStyleClass().add("cell-actions");
 
-                if(nodeEntry.getWallet().getKeystores().size() == 1 &&
-                        (nodeEntry.getWallet().getKeystores().get(0).hasSeed() || nodeEntry.getWallet().getKeystores().get(0).getSource() == KeystoreSource.HW_USB)) {
+                if(!nodeEntry.getNode().getWallet().isBip47()) {
+                    Button receiveButton = new Button("");
+                    receiveButton.setGraphic(getReceiveGlyph());
+                    receiveButton.setOnAction(event -> {
+                        EventManager.get().post(new ReceiveActionEvent(nodeEntry));
+                        Platform.runLater(() -> EventManager.get().post(new ReceiveToEvent(nodeEntry)));
+                    });
+                    actionBox.getChildren().add(receiveButton);
+                }
+
+                if(canSignMessage(nodeEntry.getNode())) {
                     Button signMessageButton = new Button("");
-                    Glyph signMessageGlyph = new Glyph(FontAwesome5.FONT_NAME, FontAwesome5.Glyph.PEN_FANCY);
-                    signMessageGlyph.setFontSize(12);
-                    signMessageButton.setGraphic(signMessageGlyph);
+                    signMessageButton.setGraphic(getSignMessageGlyph());
                     signMessageButton.setOnAction(event -> {
                         MessageSignDialog messageSignDialog = new MessageSignDialog(nodeEntry.getWallet(), nodeEntry.getNode());
                         messageSignDialog.showAndWait();
                     });
                     actionBox.getChildren().add(signMessageButton);
-                    setContextMenu(new AddressContextMenu(address, nodeEntry.getOutputDescriptor(), nodeEntry));
                 }
 
                 setGraphic(actionBox);
+
+                if(nodeEntry.getWallet().isWhirlpoolChildWallet()) {
+                    setText(address.toString().substring(0, 20) + "...");
+                    setContextMenu(null);
+                    setGraphic(new HBox());
+                }
             } else if(entry instanceof HashIndexEntry) {
                 HashIndexEntry hashIndexEntry = (HashIndexEntry)entry;
                 setText(hashIndexEntry.getDescription());
-                setContextMenu(new HashIndexEntryContextMenu(getTreeTableView(), hashIndexEntry));
+                setContextMenu(getTreeTableView().getStyleClass().contains("bip47") ? null : new HashIndexEntryContextMenu(getTreeTableView(), hashIndexEntry));
                 Tooltip tooltip = new Tooltip();
+                tooltip.setShowDelay(Duration.millis(250));
                 tooltip.setText(hashIndexEntry.getHashIndex().toString());
                 setTooltip(tooltip);
 
                 HBox actionBox = new HBox();
+                actionBox.getStyleClass().add("cell-actions");
                 Button viewTransactionButton = new Button("");
-                Glyph searchGlyph = new Glyph(FontAwesome5.FONT_NAME, FontAwesome5.Glyph.SEARCH);
-                searchGlyph.setFontSize(12);
-                viewTransactionButton.setGraphic(searchGlyph);
+                viewTransactionButton.setGraphic(getViewTransactionGlyph());
                 viewTransactionButton.setOnAction(event -> {
                     EventManager.get().post(new ViewTransactionEvent(this.getScene().getWindow(), hashIndexEntry.getBlockTransaction(), hashIndexEntry));
                 });
@@ -141,21 +181,34 @@ class EntryCell extends TreeTableCell<Entry, Entry> {
 
                 if(hashIndexEntry.getType().equals(HashIndexEntry.Type.OUTPUT) && hashIndexEntry.isSpendable() && !hashIndexEntry.getHashIndex().isSpent()) {
                     Button spendUtxoButton = new Button("");
-                    Glyph sendGlyph = new Glyph("FontAwesome", FontAwesome.Glyph.SEND);
-                    sendGlyph.setFontSize(12);
-                    spendUtxoButton.setGraphic(sendGlyph);
+                    spendUtxoButton.setGraphic(getSendGlyph());
                     spendUtxoButton.setOnAction(event -> {
                         sendSelectedUtxos(getTreeTableView(), hashIndexEntry);
                     });
                     actionBox.getChildren().add(spendUtxoButton);
                 }
 
-                setGraphic(actionBox);
+                setGraphic(getTreeTableView().getStyleClass().contains("bip47") ? null : actionBox);
             }
         }
     }
 
-    private static void increaseFee(TransactionEntry transactionEntry) {
+    @Override
+    public IntegerProperty getConfirmationsProperty() {
+        if(confirmationsProperty == null) {
+            confirmationsProperty = new SimpleIntegerProperty();
+            confirmationsProperty.addListener((observable, oldValue, newValue) -> {
+                if(newValue.intValue() >= BlockTransactionHash.BLOCKS_TO_CONFIRM) {
+                    getStyleClass().remove("confirming");
+                    confirmationsProperty.unbind();
+                }
+            });
+        }
+
+        return confirmationsProperty;
+    }
+
+    private static void increaseFee(TransactionEntry transactionEntry, boolean cancelTransaction) {
         BlockTransaction blockTransaction = transactionEntry.getBlockTransaction();
         Map<BlockTransactionHashIndex, WalletNode> walletTxos = transactionEntry.getWallet().getWalletTxos();
         List<BlockTransactionHashIndex> utxos = transactionEntry.getChildren().stream()
@@ -163,8 +216,15 @@ class EntryCell extends TreeTableCell<Entry, Entry> {
                 .map(e -> (HashIndexEntry)e)
                 .filter(e -> e.getType().equals(HashIndexEntry.Type.INPUT) && e.isSpendable())
                 .map(e -> blockTransaction.getTransaction().getInputs().get((int)e.getHashIndex().getIndex()))
+                .filter(TransactionInput::isReplaceByFeeEnabled)
                 .map(txInput -> walletTxos.keySet().stream().filter(txo -> txo.getHash().equals(txInput.getOutpoint().getHash()) && txo.getIndex() == txInput.getOutpoint().getIndex()).findFirst().get())
                 .collect(Collectors.toList());
+
+        if(utxos.isEmpty()) {
+            log.error("No UTXOs to replace");
+            AppServices.showErrorDialog("Replace By Fee Error", "Error creating RBF transaction - no replaceable UTXOs were found.");
+            return;
+        }
 
         List<TransactionOutput> ourOutputs = transactionEntry.getChildren().stream()
                 .filter(e -> e instanceof HashIndexEntry)
@@ -173,14 +233,23 @@ class EntryCell extends TreeTableCell<Entry, Entry> {
                 .map(e -> e.getBlockTransaction().getTransaction().getOutputs().get((int)e.getHashIndex().getIndex()))
                 .collect(Collectors.toList());
 
-        long changeTotal = ourOutputs.stream().mapToLong(TransactionOutput::getValue).sum();
+        List<TransactionOutput> consolidationOutputs = transactionEntry.getChildren().stream()
+                .filter(e -> e instanceof HashIndexEntry)
+                .map(e -> (HashIndexEntry)e)
+                .filter(e -> e.getType().equals(HashIndexEntry.Type.OUTPUT) && e.getKeyPurpose() == KeyPurpose.RECEIVE)
+                .map(e -> e.getBlockTransaction().getTransaction().getOutputs().get((int)e.getHashIndex().getIndex()))
+                .collect(Collectors.toList());
+
+        long changeTotal = ourOutputs.stream().mapToLong(TransactionOutput::getValue).sum() - consolidationOutputs.stream().mapToLong(TransactionOutput::getValue).sum();
         Transaction tx = blockTransaction.getTransaction();
-        int vSize = tx.getVirtualSize();
+        double vSize = tx.getVirtualSize();
         int inputSize = tx.getInputs().get(0).getLength() + (tx.getInputs().get(0).hasWitness() ? tx.getInputs().get(0).getWitness().getLength() / Transaction.WITNESS_SCALE_FACTOR : 0);
         List<BlockTransactionHashIndex> walletUtxos = new ArrayList<>(transactionEntry.getWallet().getWalletUtxos().keySet());
+        //Remove any UTXOs created by the transaction that is to be replaced
+        walletUtxos.removeIf(utxo -> ourOutputs.stream().anyMatch(output -> output.getHash().equals(utxo.getHash()) && output.getIndex() == utxo.getIndex()));
         Collections.shuffle(walletUtxos);
-        while((double)changeTotal / vSize < getMaxFeeRate() && !walletUtxos.isEmpty()) {
-            //If there is insufficent change output, include another random UTXO so the fee can be increased
+        while((double)changeTotal / vSize < getMaxFeeRate() && !walletUtxos.isEmpty() && !cancelTransaction) {
+            //If there is insufficient change output, include another random UTXO so the fee can be increased
             BlockTransactionHashIndex utxo = walletUtxos.remove(0);
             utxos.add(utxo);
             changeTotal += utxo.getValue();
@@ -189,24 +258,110 @@ class EntryCell extends TreeTableCell<Entry, Entry> {
 
         List<TransactionOutput> externalOutputs = new ArrayList<>(blockTransaction.getTransaction().getOutputs());
         externalOutputs.removeAll(ourOutputs);
+        externalOutputs.addAll(consolidationOutputs);
+        final long rbfChange = changeTotal;
         List<Payment> payments = externalOutputs.stream().map(txOutput -> {
             try {
-                return new Payment(txOutput.getScript().getToAddresses()[0], transactionEntry.getLabel(), txOutput.getValue(), false);
+                String label = transactionEntry.getLabel() == null ? "" : transactionEntry.getLabel();
+                Matcher matcher = REPLACED_BY_FEE_SUFFIX.matcher(label);
+                if(matcher.matches()) {
+                    String base = matcher.group(1);
+                    if(matcher.groupCount() > 2 && matcher.group(3) != null) {
+                        int count = Integer.parseInt(matcher.group(3)) + 1;
+                        label = base + "(Replaced By Fee #" + count + ")";
+                    } else {
+                        label = base + "(Replaced By Fee #2)";
+                    }
+                } else {
+                    label += (label.isEmpty() ? "" : " ") + "(Replaced By Fee)";
+                }
+
+                if(txOutput.getScript().getToAddress() != null) {
+                    //Disable change creation by enabling max payment when there is only one output and no additional UTXOs included
+                    return new Payment(txOutput.getScript().getToAddress(), label, txOutput.getValue(), blockTransaction.getTransaction().getOutputs().size() == 1 && rbfChange == 0);
+                }
+
+                return null;
             } catch(Exception e) {
+                log.error("Error creating RBF payment", e);
                 return null;
             }
         }).filter(Objects::nonNull).collect(Collectors.toList());
 
+        List<byte[]> opReturns = externalOutputs.stream().map(txOutput -> {
+            List<ScriptChunk> scriptChunks = txOutput.getScript().getChunks();
+            if(scriptChunks.size() != 2 || scriptChunks.get(0).getOpcode() != ScriptOpCodes.OP_RETURN) {
+                return null;
+            }
+            if(scriptChunks.get(1).getData() != null) {
+                return scriptChunks.get(1).getData();
+            }
+
+            return null;
+        }).filter(Objects::nonNull).collect(Collectors.toList());
+
+        if(payments.isEmpty()) {
+            AppServices.showErrorDialog("Replace By Fee Error", "Error creating RBF transaction, check log for details");
+            return;
+        }
+
+        if(cancelTransaction) {
+            Payment existing = payments.get(0);
+            Address address = transactionEntry.getWallet().getFreshNode(KeyPurpose.CHANGE).getAddress();
+            Payment payment = new Payment(address, existing.getLabel(), existing.getAmount(), true);
+            payments.clear();
+            payments.add(payment);
+            opReturns.clear();
+        }
+
         EventManager.get().post(new SendActionEvent(transactionEntry.getWallet(), utxos));
-        Platform.runLater(() -> EventManager.get().post(new SpendUtxoEvent(transactionEntry.getWallet(), utxos, payments, blockTransaction.getFee(), true)));
+        Platform.runLater(() -> EventManager.get().post(new SpendUtxoEvent(transactionEntry.getWallet(), utxos, payments, opReturns.isEmpty() ? null : opReturns, blockTransaction.getFee(), true)));
     }
 
     private static Double getMaxFeeRate() {
-        if(AppServices.getTargetBlockFeeRates().isEmpty()) {
+        if(AppServices.getTargetBlockFeeRates() == null || AppServices.getTargetBlockFeeRates().isEmpty()) {
             return 100.0;
         }
 
         return AppServices.getTargetBlockFeeRates().values().iterator().next();
+    }
+
+    private static void createCpfp(TransactionEntry transactionEntry) {
+        BlockTransaction blockTransaction = transactionEntry.getBlockTransaction();
+        List<BlockTransactionHashIndex> ourOutputs = transactionEntry.getChildren().stream()
+                .filter(e -> e instanceof HashIndexEntry)
+                .map(e -> (HashIndexEntry)e)
+                .filter(e -> e.getType().equals(HashIndexEntry.Type.OUTPUT))
+                .map(HashIndexEntry::getHashIndex)
+                .collect(Collectors.toList());
+
+        if(ourOutputs.isEmpty()) {
+            throw new IllegalStateException("Cannot create CPFP without any wallet outputs to spend");
+        }
+
+        BlockTransactionHashIndex utxo = ourOutputs.get(0);
+
+        WalletNode freshNode = transactionEntry.getWallet().getFreshNode(KeyPurpose.RECEIVE);
+        String label = transactionEntry.getLabel() == null ? "" : transactionEntry.getLabel();
+        label += (label.isEmpty() ? "" : " ") + "(CPFP)";
+        Payment payment = new Payment(freshNode.getAddress(), label, utxo.getValue(), true);
+
+        EventManager.get().post(new SendActionEvent(transactionEntry.getWallet(), List.of(utxo)));
+        Platform.runLater(() -> EventManager.get().post(new SpendUtxoEvent(transactionEntry.getWallet(), List.of(utxo), List.of(payment), null, blockTransaction.getFee(), false)));
+    }
+
+    private static boolean canSignMessage(WalletNode walletNode) {
+        Wallet wallet = walletNode.getWallet();
+        return wallet.getKeystores().size() == 1 && wallet.getScriptType() != ScriptType.P2TR &&
+                (wallet.getKeystores().get(0).hasPrivateKey() || wallet.getKeystores().get(0).getSource() == KeystoreSource.HW_USB) &&
+                (!wallet.isBip47() || walletNode.getKeyPurpose() == KeyPurpose.RECEIVE);
+    }
+
+    private static boolean containsWalletOutputs(TransactionEntry transactionEntry) {
+        return transactionEntry.getChildren().stream()
+                .filter(e -> e instanceof HashIndexEntry)
+                .map(e -> (HashIndexEntry)e)
+                .anyMatch(e -> e.getType().equals(HashIndexEntry.Type.OUTPUT));
     }
 
     private static void sendSelectedUtxos(TreeTableView<Entry> treeTableView, HashIndexEntry hashIndexEntry) {
@@ -226,19 +381,162 @@ class EntryCell extends TreeTableCell<Entry, Entry> {
         Platform.runLater(() -> EventManager.get().post(new SpendUtxoEvent(hashIndexEntry.getWallet(), spendingUtxos)));
     }
 
-    private static void freezeUtxo(HashIndexEntry hashIndexEntry) {
-        hashIndexEntry.getHashIndex().setStatus(Status.FROZEN);
-        EventManager.get().post(new WalletUtxoStatusChangedEvent(hashIndexEntry.getWallet(), hashIndexEntry.getHashIndex()));
+    private static void freezeUtxo(TreeTableView<Entry> treeTableView, HashIndexEntry hashIndexEntry) {
+        List<BlockTransactionHashIndex> utxos = treeTableView.getSelectionModel().getSelectedCells().stream()
+                .map(tp -> tp.getTreeItem().getValue())
+                .filter(e -> e instanceof HashIndexEntry && ((HashIndexEntry)e).getType().equals(HashIndexEntry.Type.OUTPUT))
+                .map(e -> ((HashIndexEntry)e).getHashIndex())
+                .filter(ref -> ref.getStatus() != Status.FROZEN)
+                .collect(Collectors.toList());
+
+        utxos.forEach(ref -> ref.setStatus(Status.FROZEN));
+        EventManager.get().post(new WalletUtxoStatusChangedEvent(hashIndexEntry.getWallet(), utxos));
     }
 
-    private static void unfreezeUtxo(HashIndexEntry hashIndexEntry) {
-        hashIndexEntry.getHashIndex().setStatus(null);
-        EventManager.get().post(new WalletUtxoStatusChangedEvent(hashIndexEntry.getWallet(), hashIndexEntry.getHashIndex()));
+    private static void unfreezeUtxo(TreeTableView<Entry> treeTableView, HashIndexEntry hashIndexEntry) {
+        List<BlockTransactionHashIndex> utxos = treeTableView.getSelectionModel().getSelectedCells().stream()
+                .map(tp -> tp.getTreeItem().getValue())
+                .filter(e -> e instanceof HashIndexEntry && ((HashIndexEntry)e).getType().equals(HashIndexEntry.Type.OUTPUT))
+                .map(e -> ((HashIndexEntry)e).getHashIndex())
+                .filter(ref -> ref.getStatus() == Status.FROZEN)
+                .collect(Collectors.toList());
+
+        utxos.forEach(ref -> ref.setStatus(null));
+        EventManager.get().post(new WalletUtxoStatusChangedEvent(hashIndexEntry.getWallet(), utxos));
+    }
+
+    private String getTooltip(TransactionEntry transactionEntry) {
+        String tooltip = transactionEntry.getBlockTransaction().getHash().toString();
+        if(transactionEntry.getBlockTransaction().getHeight() <= 0) {
+            Double feeRate = transactionEntry.getBlockTransaction().getFeeRate();
+            Long vSizefromTip = transactionEntry.getVSizeFromTip();
+            if(feeRate != null && vSizefromTip != null) {
+                long blocksFromTip = (long)Math.ceil((double)vSizefromTip / Transaction.MAX_BLOCK_SIZE);
+
+                String amount = vSizefromTip + " vB";
+                if(vSizefromTip > 1000 * 1000) {
+                    amount = String.format("%.2f", (double)vSizefromTip / (1000 * 1000)) + " MvB";
+                } else if(vSizefromTip > 1000) {
+                    amount = String.format("%.2f", (double)vSizefromTip / 1000) + " kvB";
+                }
+
+                tooltip += "\nConfirms in: " + (blocksFromTip > 1 ? blocksFromTip + "+ blocks" : "1 block") + " (" + amount + " from tip)";
+            }
+
+            if(feeRate != null) {
+                tooltip += "\nFee rate: " + String.format("%.2f", feeRate) + " sats/vB";
+            }
+
+            tooltip += "\nRBF: " + (transactionEntry.getBlockTransaction().getTransaction().isReplaceByFee() ? "Enabled" : "Disabled");
+        }
+
+        return tooltip;
+    }
+
+    private static Glyph getViewTransactionGlyph() {
+        Glyph searchGlyph = new Glyph(FontAwesome5.FONT_NAME, FontAwesome5.Glyph.SEARCH);
+        searchGlyph.setFontSize(12);
+        return searchGlyph;
+    }
+
+    private static Glyph getIncreaseFeeRBFGlyph() {
+        Glyph increaseFeeGlyph = new Glyph(FontAwesome5.FONT_NAME, FontAwesome5.Glyph.HAND_HOLDING_MEDICAL);
+        increaseFeeGlyph.setFontSize(12);
+        return increaseFeeGlyph;
+    }
+
+    private static Glyph getCancelTransactionRBFGlyph() {
+        Glyph cancelTxGlyph = new Glyph(FontAwesome5.FONT_NAME, FontAwesome5.Glyph.BAN);
+        cancelTxGlyph.setFontSize(12);
+        return cancelTxGlyph;
+    }
+
+    private static Glyph getIncreaseFeeCPFPGlyph() {
+        Glyph cpfpGlyph = new Glyph(FontAwesome5.FONT_NAME, FontAwesome5.Glyph.SIGN_OUT_ALT);
+        cpfpGlyph.setFontSize(12);
+        return cpfpGlyph;
+    }
+
+    private static Glyph getReceiveGlyph() {
+        Glyph receiveGlyph = new Glyph("FontAwesome", FontAwesome.Glyph.ARROW_DOWN);
+        receiveGlyph.setFontSize(12);
+        return receiveGlyph;
+    }
+
+    private static Glyph getSignMessageGlyph() {
+        Glyph signMessageGlyph = new Glyph(FontAwesome5.FONT_NAME, FontAwesome5.Glyph.PEN_FANCY);
+        signMessageGlyph.setFontSize(12);
+        return signMessageGlyph;
+    }
+
+    private static Glyph getSendGlyph() {
+        Glyph sendGlyph = new Glyph("FontAwesome", FontAwesome.Glyph.SEND);
+        sendGlyph.setFontSize(12);
+        return sendGlyph;
+    }
+
+    private static Glyph getCopyGlyph() {
+        Glyph copyGlyph = new Glyph(FontAwesome5.FONT_NAME, FontAwesome5.Glyph.COPY);
+        copyGlyph.setFontSize(12);
+        return copyGlyph;
+    }
+
+    private static Glyph getFreezeGlyph() {
+        Glyph copyGlyph = new Glyph(FontAwesome5.FONT_NAME, FontAwesome5.Glyph.SNOWFLAKE);
+        copyGlyph.setFontSize(12);
+        return copyGlyph;
+    }
+
+    private static Glyph getUnfreezeGlyph() {
+        Glyph copyGlyph = new Glyph(FontAwesome5.FONT_NAME, FontAwesome5.Glyph.SUN);
+        copyGlyph.setFontSize(12);
+        return copyGlyph;
     }
 
     private static class UnconfirmedTransactionContextMenu extends ContextMenu {
         public UnconfirmedTransactionContextMenu(TransactionEntry transactionEntry) {
             BlockTransaction blockTransaction = transactionEntry.getBlockTransaction();
+            MenuItem viewTransaction = new MenuItem("View Transaction");
+            viewTransaction.setGraphic(getViewTransactionGlyph());
+            viewTransaction.setOnAction(AE -> {
+                hide();
+                EventManager.get().post(new ViewTransactionEvent(this.getOwnerWindow(), blockTransaction));
+            });
+            getItems().add(viewTransaction);
+
+            if(blockTransaction.getTransaction().isReplaceByFee() && Config.get().isIncludeMempoolOutputs() && transactionEntry.getWallet().allInputsFromWallet(blockTransaction.getHash())) {
+                MenuItem increaseFee = new MenuItem("Increase Fee (RBF)");
+                increaseFee.setGraphic(getIncreaseFeeRBFGlyph());
+                increaseFee.setOnAction(AE -> {
+                    hide();
+                    increaseFee(transactionEntry, false);
+                });
+
+                getItems().add(increaseFee);
+            }
+
+            if(blockTransaction.getTransaction().isReplaceByFee() && Config.get().isIncludeMempoolOutputs() && transactionEntry.getWallet().allInputsFromWallet(blockTransaction.getHash())) {
+                MenuItem cancelTx = new MenuItem("Cancel Transaction (RBF)");
+                cancelTx.setGraphic(getCancelTransactionRBFGlyph());
+                cancelTx.setOnAction(AE -> {
+                    hide();
+                    increaseFee(transactionEntry, true);
+                });
+
+                getItems().add(cancelTx);
+            }
+
+            if(containsWalletOutputs(transactionEntry)) {
+                MenuItem createCpfp = new MenuItem("Increase Effective Fee (CPFP)");
+                createCpfp.setGraphic(getIncreaseFeeCPFPGlyph());
+                createCpfp.setOnAction(AE -> {
+                    hide();
+                    createCpfp(transactionEntry);
+                });
+
+                getItems().add(createCpfp);
+            }
+
             MenuItem copyTxid = new MenuItem("Copy Transaction ID");
             copyTxid.setOnAction(AE -> {
                 hide();
@@ -248,21 +546,18 @@ class EntryCell extends TreeTableCell<Entry, Entry> {
             });
 
             getItems().add(copyTxid);
-
-            if(blockTransaction.getTransaction().isReplaceByFee() && transactionEntry.getWallet().allInputsFromWallet(blockTransaction.getHash())) {
-                MenuItem increaseFee = new MenuItem("Increase Fee");
-                increaseFee.setOnAction(AE -> {
-                    hide();
-                    increaseFee(transactionEntry);
-                });
-
-                getItems().add(increaseFee);
-            }
         }
     }
 
     private static class TransactionContextMenu extends ContextMenu {
         public TransactionContextMenu(String date, BlockTransaction blockTransaction) {
+            MenuItem viewTransaction = new MenuItem("View Transaction");
+            viewTransaction.setGraphic(getViewTransactionGlyph());
+            viewTransaction.setOnAction(AE -> {
+                hide();
+                EventManager.get().post(new ViewTransactionEvent(this.getOwnerWindow(), blockTransaction));
+            });
+
             MenuItem copyDate = new MenuItem("Copy Date");
             copyDate.setOnAction(AE -> {
                 hide();
@@ -287,12 +582,70 @@ class EntryCell extends TreeTableCell<Entry, Entry> {
                 Clipboard.getSystemClipboard().setContent(content);
             });
 
-            getItems().addAll(copyDate, copyTxid, copyHeight);
+            getItems().addAll(viewTransaction, copyDate, copyTxid, copyHeight);
         }
     }
 
     public static class AddressContextMenu extends ContextMenu {
-        public AddressContextMenu(Address address, String outputDescriptor, NodeEntry nodeEntry) {
+        public AddressContextMenu(Address address, String outputDescriptor, NodeEntry nodeEntry, boolean addUtxoItems) {
+            if(nodeEntry == null || !nodeEntry.getWallet().isBip47()) {
+                MenuItem receiveToAddress = new MenuItem("Receive To");
+                receiveToAddress.setGraphic(getReceiveGlyph());
+                receiveToAddress.setOnAction(event -> {
+                    hide();
+                    EventManager.get().post(new ReceiveActionEvent(nodeEntry));
+                    Platform.runLater(() -> EventManager.get().post(new ReceiveToEvent(nodeEntry)));
+                });
+                getItems().add(receiveToAddress);
+            }
+
+            if(nodeEntry != null && canSignMessage(nodeEntry.getNode())) {
+                MenuItem signVerifyMessage = new MenuItem("Sign/Verify Message");
+                signVerifyMessage.setGraphic(getSignMessageGlyph());
+                signVerifyMessage.setOnAction(AE -> {
+                    hide();
+                    MessageSignDialog messageSignDialog = new MessageSignDialog(nodeEntry.getWallet(), nodeEntry.getNode());
+                    messageSignDialog.showAndWait();
+                });
+                getItems().add(signVerifyMessage);
+            }
+
+            if(addUtxoItems && nodeEntry != null && !nodeEntry.getNode().getUnspentTransactionOutputs().isEmpty()) {
+                List<BlockTransactionHashIndex> utxos = nodeEntry.getNode().getUnspentTransactionOutputs().stream().collect(Collectors.toList());
+                MenuItem spendUtxos = new MenuItem("Spend UTXOs");
+                spendUtxos.setGraphic(getSendGlyph());
+                spendUtxos.setOnAction(AE -> {
+                    hide();
+                    EventManager.get().post(new SendActionEvent(nodeEntry.getWallet(), utxos));
+                    Platform.runLater(() -> EventManager.get().post(new SpendUtxoEvent(nodeEntry.getWallet(), utxos)));
+                });
+                getItems().add(spendUtxos);
+
+                List<BlockTransactionHashIndex> unfrozenUtxos = nodeEntry.getNode().getUnspentTransactionOutputs().stream().filter(utxo -> utxo.getStatus() != Status.FROZEN).collect(Collectors.toList());
+                if(!unfrozenUtxos.isEmpty()) {
+                    MenuItem freezeUtxos = new MenuItem("Freeze UTXOs");
+                    freezeUtxos.setGraphic(getFreezeGlyph());
+                    freezeUtxos.setOnAction(AE -> {
+                        hide();
+                        unfrozenUtxos.forEach(utxo -> utxo.setStatus(Status.FROZEN));
+                        EventManager.get().post(new WalletUtxoStatusChangedEvent(nodeEntry.getWallet(), unfrozenUtxos));
+                    });
+                    getItems().add(freezeUtxos);
+                }
+
+                List<BlockTransactionHashIndex> frozenUtxos = nodeEntry.getNode().getUnspentTransactionOutputs().stream().filter(utxo -> utxo.getStatus() == Status.FROZEN).collect(Collectors.toList());
+                if(!frozenUtxos.isEmpty()) {
+                    MenuItem unfreezeUtxos = new MenuItem("Unfreeze UTXOs");
+                    unfreezeUtxos.setGraphic(getUnfreezeGlyph());
+                    unfreezeUtxos.setOnAction(AE -> {
+                        hide();
+                        frozenUtxos.forEach(utxo -> utxo.setStatus(null));
+                        EventManager.get().post(new WalletUtxoStatusChangedEvent(nodeEntry.getWallet(), frozenUtxos));
+                    });
+                    getItems().add(unfreezeUtxos);
+                }
+            }
+
             MenuItem copyAddress = new MenuItem("Copy Address");
             copyAddress.setOnAction(AE -> {
                 hide();
@@ -318,34 +671,22 @@ class EntryCell extends TreeTableCell<Entry, Entry> {
             });
 
             getItems().addAll(copyAddress, copyHex, copyOutputDescriptor);
-
-            if(nodeEntry != null) {
-                MenuItem signVerifyMessage = new MenuItem("Sign/Verify Message");
-                signVerifyMessage.setOnAction(AE -> {
-                    hide();
-                    MessageSignDialog messageSignDialog = new MessageSignDialog(nodeEntry.getWallet(), nodeEntry.getNode());
-                    messageSignDialog.showAndWait();
-                });
-
-                getItems().add(signVerifyMessage);
-            }
         }
     }
 
     private static class HashIndexEntryContextMenu extends ContextMenu {
         public HashIndexEntryContextMenu(TreeTableView<Entry> treeTableView, HashIndexEntry hashIndexEntry) {
-            String label = "Copy " + (hashIndexEntry.getType().equals(HashIndexEntry.Type.OUTPUT) ? "Transaction Output" : "Transaction Input");
-            MenuItem copyHashIndex = new MenuItem(label);
-            copyHashIndex.setOnAction(AE -> {
+            MenuItem viewTransaction = new MenuItem("View Transaction");
+            viewTransaction.setGraphic(getViewTransactionGlyph());
+            viewTransaction.setOnAction(AE -> {
                 hide();
-                ClipboardContent content = new ClipboardContent();
-                content.putString(hashIndexEntry.getHashIndex().toString());
-                Clipboard.getSystemClipboard().setContent(content);
+                EventManager.get().post(new ViewTransactionEvent(this.getOwnerWindow(), hashIndexEntry.getBlockTransaction()));
             });
-            getItems().add(copyHashIndex);
+            getItems().add(viewTransaction);
 
             if(hashIndexEntry.getType().equals(HashIndexEntry.Type.OUTPUT) && hashIndexEntry.isSpendable() && !hashIndexEntry.getHashIndex().isSpent()) {
                 MenuItem sendSelected = new MenuItem("Send Selected");
+                sendSelected.setGraphic(getSendGlyph());
                 sendSelected.setOnAction(AE -> {
                     hide();
                     sendSelectedUtxos(treeTableView, hashIndexEntry);
@@ -356,20 +697,32 @@ class EntryCell extends TreeTableCell<Entry, Entry> {
             if(hashIndexEntry.getType().equals(HashIndexEntry.Type.OUTPUT) && !hashIndexEntry.getHashIndex().isSpent()) {
                 if(hashIndexEntry.getHashIndex().getStatus() == null || hashIndexEntry.getHashIndex().getStatus() != Status.FROZEN) {
                     MenuItem freezeUtxo = new MenuItem("Freeze UTXO");
+                    freezeUtxo.setGraphic(getFreezeGlyph());
                     freezeUtxo.setOnAction(AE -> {
                         hide();
-                        freezeUtxo(hashIndexEntry);
+                        freezeUtxo(treeTableView, hashIndexEntry);
                     });
                     getItems().add(freezeUtxo);
                 } else {
                     MenuItem unfreezeUtxo = new MenuItem("Unfreeze UTXO");
+                    unfreezeUtxo.setGraphic(getUnfreezeGlyph());
                     unfreezeUtxo.setOnAction(AE -> {
                         hide();
-                        unfreezeUtxo(hashIndexEntry);
+                        unfreezeUtxo(treeTableView, hashIndexEntry);
                     });
                     getItems().add(unfreezeUtxo);
                 }
             }
+
+            String label = "Copy " + (hashIndexEntry.getType().equals(HashIndexEntry.Type.OUTPUT) ? "Transaction Output" : "Transaction Input");
+            MenuItem copyHashIndex = new MenuItem(label);
+            copyHashIndex.setOnAction(AE -> {
+                hide();
+                ClipboardContent content = new ClipboardContent();
+                content.putString(hashIndexEntry.getHashIndex().toString());
+                Clipboard.getSystemClipboard().setContent(content);
+            });
+            getItems().add(copyHashIndex);
         }
     }
 
@@ -380,6 +733,7 @@ class EntryCell extends TreeTableCell<Entry, Entry> {
         cell.getStyleClass().remove("address-cell");
         cell.getStyleClass().remove("hashindex-row");
         cell.getStyleClass().remove("confirming");
+        cell.getStyleClass().remove("negative-amount");
         cell.getStyleClass().remove("spent");
         cell.getStyleClass().remove("unspendable");
 
@@ -387,13 +741,14 @@ class EntryCell extends TreeTableCell<Entry, Entry> {
             if(entry instanceof TransactionEntry) {
                 cell.getStyleClass().add("transaction-row");
                 TransactionEntry transactionEntry = (TransactionEntry)entry;
-                if(transactionEntry.isConfirming()) {
-                    cell.getStyleClass().add("confirming");
-                    transactionEntry.confirmationsProperty().addListener((observable, oldValue, newValue) -> {
-                        if(!transactionEntry.isConfirming()) {
-                            cell.getStyleClass().remove("confirming");
-                        }
-                    });
+
+                if(cell instanceof ConfirmationsListener confirmationsListener) {
+                    if(transactionEntry.isConfirming()) {
+                        cell.getStyleClass().add("confirming");
+                        confirmationsListener.getConfirmationsProperty().bind(transactionEntry.confirmationsProperty());
+                    } else {
+                        confirmationsListener.getConfirmationsProperty().unbind();
+                    }
                 }
             } else if(entry instanceof NodeEntry) {
                 cell.getStyleClass().add("node-row");

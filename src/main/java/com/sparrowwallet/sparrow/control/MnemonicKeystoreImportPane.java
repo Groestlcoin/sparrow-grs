@@ -3,101 +3,53 @@ package com.sparrowwallet.sparrow.control;
 import com.sparrowwallet.drongo.KeyDerivation;
 import com.sparrowwallet.drongo.crypto.ChildNumber;
 import com.sparrowwallet.drongo.protocol.ScriptType;
-import com.sparrowwallet.drongo.wallet.*;
+import com.sparrowwallet.drongo.wallet.DeterministicSeed;
+import com.sparrowwallet.drongo.wallet.Keystore;
+import com.sparrowwallet.drongo.wallet.MnemonicException;
+import com.sparrowwallet.drongo.wallet.Wallet;
 import com.sparrowwallet.sparrow.EventManager;
 import com.sparrowwallet.sparrow.event.KeystoreImportEvent;
-import com.sparrowwallet.sparrow.glyphfont.FontAwesome5;
-import com.sparrowwallet.sparrow.io.*;
-import javafx.beans.property.SimpleListProperty;
-import javafx.beans.property.SimpleStringProperty;
-import javafx.collections.FXCollections;
-import javafx.collections.ListChangeListener;
-import javafx.collections.ObservableList;
+import com.sparrowwallet.sparrow.io.ImportException;
+import com.sparrowwallet.sparrow.io.KeystoreMnemonicImport;
 import javafx.geometry.Insets;
-import javafx.geometry.Orientation;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.*;
-import javafx.scene.layout.*;
-import javafx.util.Callback;
-import org.controlsfx.control.textfield.AutoCompletionBinding;
-import org.controlsfx.control.textfield.CustomTextField;
-import org.controlsfx.control.textfield.TextFields;
-import org.controlsfx.glyphfont.Glyph;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
+import javafx.scene.layout.StackPane;
 import org.controlsfx.tools.Borders;
 import org.controlsfx.validation.ValidationResult;
 import org.controlsfx.validation.ValidationSupport;
 import org.controlsfx.validation.Validator;
 import org.controlsfx.validation.decoration.StyleClassValidationDecoration;
 
+import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 
-public class MnemonicKeystoreImportPane extends TitledDescriptionPane {
+public class MnemonicKeystoreImportPane extends MnemonicKeystorePane {
     protected final Wallet wallet;
     private final KeystoreMnemonicImport importer;
 
-    private SplitMenuButton enterMnemonicButton;
     private SplitMenuButton importButton;
 
-    private TilePane wordsPane;
     private Button generateButton;
-    private Label validLabel;
-    private Label invalidLabel;
     private Button calculateButton;
     private Button backButton;
     private Button nextButton;
     private Button confirmButton;
     private List<String> generatedMnemonicCode;
 
-    private SimpleListProperty<String> wordEntriesProperty;
-    private final SimpleStringProperty passphraseProperty = new SimpleStringProperty();
-
     public MnemonicKeystoreImportPane(Wallet wallet, KeystoreMnemonicImport importer) {
-        super(importer.getName(), "Seed import", importer.getKeystoreImportDescription(), "image/" + importer.getWalletModel().getType() + ".png");
+        super(importer.getName(), "Create or enter seed", importer.getKeystoreImportDescription(), "image/" + importer.getWalletModel().getType() + ".png");
         this.wallet = wallet;
         this.importer = importer;
 
         createImportButton();
         buttonBox.getChildren().add(importButton);
-    }
-
-    public MnemonicKeystoreImportPane(Keystore keystore) {
-        super(keystore.getSeed().getType().getName(), keystore.getSeed().needsPassphrase() ? "Passphrase enabled" : "Passphrase disabled", "", "image/" + WalletModel.SEED.getType() + ".png");
-        this.wallet = null;
-        this.importer = null;
-        showHideLink.setVisible(false);
-        buttonBox.getChildren().clear();
-
-        showWordList(keystore.getSeed());
-    }
-
-    @Override
-    protected Control createButton() {
-        createEnterMnemonicButton();
-        return enterMnemonicButton;
-    }
-
-    private void createEnterMnemonicButton() {
-        enterMnemonicButton = new SplitMenuButton();
-        enterMnemonicButton.setAlignment(Pos.CENTER_RIGHT);
-        enterMnemonicButton.setText("Set Words Size");
-        enterMnemonicButton.setOnAction(event -> {
-            enterMnemonic(24);
-        });
-        int[] numberWords = new int[] {24, 21, 18, 15, 12};
-        for(int i = 0; i < numberWords.length; i++) {
-            MenuItem item = new MenuItem(numberWords[i] + " words");
-            final int words = numberWords[i];
-            item.setOnAction(event -> {
-                enterMnemonic(words);
-            });
-            enterMnemonicButton.getItems().add(item);
-        }
-        enterMnemonicButton.managedProperty().bind(enterMnemonicButton.visibleProperty());
     }
 
     private void createImportButton() {
@@ -109,7 +61,7 @@ public class MnemonicKeystoreImportPane extends TitledDescriptionPane {
             importButton.setDisable(true);
             importKeystore(wallet.getScriptType().getDefaultDerivation(), false);
         });
-        String[] accounts = new String[] {"Default Account #0", "Account #1", "Account #2", "Account #3", "Account #4", "Account #5", "Account #6", "Account #7", "Account #8", "Account #9"};
+        String[] accounts = new String[] {"Import Default Account #0", "Import Account #1", "Import Account #2", "Import Account #3", "Import Account #4", "Import Account #5", "Import Account #6", "Import Account #7", "Import Account #8", "Import Account #9"};
         int scriptAccountsLength = ScriptType.P2SH.equals(wallet.getScriptType()) ? 1 : accounts.length;
         for(int i = 0; i < scriptAccountsLength; i++) {
             MenuItem item = new MenuItem(accounts[i]);
@@ -125,157 +77,95 @@ public class MnemonicKeystoreImportPane extends TitledDescriptionPane {
         importButton.setVisible(false);
     }
 
-    private void enterMnemonic(int numWords) {
+    protected void enterMnemonic(int numWords) {
         generatedMnemonicCode = null;
-        setDescription("Enter mnemonic word list");
-        showHideLink.setVisible(false);
-        setContent(getMnemonicWordsEntry(numWords, false));
-        setExpanded(true);
+        super.enterMnemonic(numWords);
     }
 
-    private Node getMnemonicWordsEntry(int numWords, boolean displayWordsOnly) {
-        VBox vBox = new VBox();
-        vBox.setSpacing(10);
+    protected List<Node> createLeftButtons() {
+        generateButton = new Button("Generate New");
+        generateButton.setOnAction(event -> {
+            generateNew();
+        });
+        generateButton.managedProperty().bind(generateButton.visibleProperty());
+        generateButton.setTooltip(new Tooltip("Generate a unique set of words that provide the seed for your wallet"));
 
-        wordsPane = new TilePane();
-        wordsPane.setPrefRows(numWords/3);
-        wordsPane.setHgap(10);
-        wordsPane.setVgap(10);
-        wordsPane.setOrientation(Orientation.VERTICAL);
+        return List.of(generateButton);
+    }
 
-        List<String> words = new ArrayList<>();
-        for(int i = 0; i < numWords; i++) {
-            words.add("");
-        }
+    protected List<Node> createRightButtons() {
+        confirmButton = new Button("Re-enter Words...");
+        confirmButton.setOnAction(event -> {
+            confirmBackup();
+        });
+        confirmButton.managedProperty().bind(confirmButton.visibleProperty());
+        confirmButton.setVisible(false);
+        confirmButton.setDefaultButton(true);
+        confirmButton.setTooltip(new Tooltip("Re-enter the generated word list to confirm your backup is correct"));
 
-        ObservableList<String> wordEntryList = FXCollections.observableArrayList(words);
-        wordEntriesProperty = new SimpleListProperty<>(wordEntryList);
-        for(int i = 0; i < numWords; i++) {
-            WordEntry wordEntry = new WordEntry(i, wordEntryList);
-            wordsPane.getChildren().add(wordEntry);
-        }
+        calculateButton = new Button("Create Keystore");
+        calculateButton.setDisable(true);
+        calculateButton.setDefaultButton(true);
+        calculateButton.setOnAction(event -> {
+            prepareImport();
+        });
+        calculateButton.managedProperty().bind(calculateButton.visibleProperty());
+        calculateButton.setTooltip(new Tooltip("Create the keystore from the provided word list"));
 
-        vBox.getChildren().add(wordsPane);
+        backButton = new Button("Back");
+        backButton.setOnAction(event -> {
+            displayMnemonicCode();
+        });
+        backButton.managedProperty().bind(backButton.visibleProperty());
+        backButton.setTooltip(new Tooltip("Go back to the generated word list"));
+        backButton.setVisible(false);
 
-        if(!displayWordsOnly) {
-            PassphraseEntry passphraseEntry = new PassphraseEntry();
-            passphraseEntry.setPadding(new Insets(0, 26, 10, 10));
-            vBox.getChildren().add(passphraseEntry);
+        nextButton = new Button("Confirm Backup...");
+        nextButton.setOnAction(event -> {
+            confirmRecord();
+        });
+        nextButton.managedProperty().bind(nextButton.visibleProperty());
+        nextButton.setTooltip(new Tooltip("Confirm you have recorded the generated word list"));
+        nextButton.setVisible(false);
+        nextButton.setDefaultButton(true);
 
-            AnchorPane buttonPane = new AnchorPane();
-            buttonPane.setPadding(new Insets(0, 26, 0, 10));
+        return List.of(backButton, nextButton, confirmButton, calculateButton);
+    }
 
-            generateButton = new Button("Generate New");
-            generateButton.setOnAction(event -> {
-                generateNew();
-            });
-            generateButton.managedProperty().bind(generateButton.visibleProperty());
-            generateButton.setTooltip(new Tooltip("Generate a unique set of words that provide the seed for your wallet"));
-            buttonPane.getChildren().add(generateButton);
-            AnchorPane.setLeftAnchor(generateButton, 0.0);
-
-            validLabel = new Label("Valid checksum", getValidGlyph());
-            validLabel.setContentDisplay(ContentDisplay.LEFT);
-            validLabel.setGraphicTextGap(5.0);
-            validLabel.managedProperty().bind(validLabel.visibleProperty());
-            validLabel.setVisible(false);
-            buttonPane.getChildren().add(validLabel);
-            AnchorPane.setTopAnchor(validLabel, 5.0);
-            AnchorPane.setLeftAnchor(validLabel, 0.0);
-
-            invalidLabel = new Label("Invalid checksum", getInvalidGlyph());
-            invalidLabel.setContentDisplay(ContentDisplay.LEFT);
-            invalidLabel.setGraphicTextGap(5.0);
-            invalidLabel.managedProperty().bind(invalidLabel.visibleProperty());
-            invalidLabel.setVisible(false);
-            buttonPane.getChildren().add(invalidLabel);
-            AnchorPane.setTopAnchor(invalidLabel, 5.0);
-            AnchorPane.setLeftAnchor(invalidLabel, 0.0);
-
-            confirmButton = new Button("Re-enter Words...");
-            confirmButton.setOnAction(event -> {
-                confirmBackup();
-            });
-            confirmButton.managedProperty().bind(confirmButton.visibleProperty());
-            confirmButton.setVisible(false);
-            confirmButton.setDefaultButton(true);
-            confirmButton.setTooltip(new Tooltip("Re-enter the generated word list to confirm your backup is correct"));
-
-            calculateButton = new Button("Calculate Seed");
-            calculateButton.setDisable(true);
-            calculateButton.setDefaultButton(true);
-            calculateButton.setOnAction(event -> {
-                prepareImport();
-            });
-            calculateButton.managedProperty().bind(calculateButton.visibleProperty());
-            calculateButton.setTooltip(new Tooltip("Calculate the seed from the provided word list"));
-
-            backButton = new Button("Back");
-            backButton.setOnAction(event -> {
-                displayMnemonicCode();
-            });
-            backButton.managedProperty().bind(backButton.visibleProperty());
-            backButton.setTooltip(new Tooltip("Go back to the generated word list"));
-            backButton.setVisible(false);
-
-            nextButton = new Button("Confirm Backup...");
-            nextButton.setOnAction(event -> {
-                confirmRecord();
-            });
-            nextButton.managedProperty().bind(nextButton.visibleProperty());
-            nextButton.setTooltip(new Tooltip("Confirm you have recorded the generated word list"));
-            nextButton.setVisible(false);
-            nextButton.setDefaultButton(true);
-
-            wordEntriesProperty.addListener((ListChangeListener<String>) c -> {
-                boolean empty = true;
-                boolean validWords = true;
-                boolean validChecksum = false;
-                for(String word : wordEntryList) {
-                    if(!word.isEmpty()) {
-                        empty = false;
-                    }
-
-                    if(!WordEntry.isValid(word)) {
-                        validWords = false;
-                    }
+    protected void onWordChange(boolean empty, boolean validWords, boolean validChecksum) {
+        if(!empty && validWords) {
+            try {
+                importer.getKeystore(wallet.getScriptType().getDefaultDerivation(), wordEntriesProperty.get(), passphraseProperty.get());
+                validChecksum = true;
+            } catch(ImportException e) {
+                if(e.getCause() instanceof MnemonicException.MnemonicTypeException) {
+                    invalidLabel.setText("Unsupported Electrum seed");
+                    invalidLabel.setTooltip(new Tooltip("Seeds created in Electrum do not follow the BIP39 standard. Import the Electrum wallet file directly."));
+                } else {
+                    invalidLabel.setText("Invalid checksum");
+                    invalidLabel.setTooltip(null);
                 }
-
-                if(!empty && validWords) {
-                    try {
-                        importer.getKeystore(wallet.getScriptType().getDefaultDerivation(), wordEntriesProperty.get(), passphraseProperty.get());
-                        validChecksum = true;
-                    } catch(ImportException e) {
-                        //ignore
-                    }
-                }
-
-                generateButton.setVisible(empty && generatedMnemonicCode == null);
-                calculateButton.setDisable(!validChecksum);
-                validLabel.setVisible(validChecksum);
-                invalidLabel.setVisible(!validChecksum && !empty);
-            });
-
-            HBox rightBox = new HBox();
-            rightBox.setSpacing(10);
-            rightBox.getChildren().addAll(backButton, nextButton, confirmButton, calculateButton);
-
-            buttonPane.getChildren().add(rightBox);
-            AnchorPane.setRightAnchor(rightBox, 0.0);
-
-            vBox.getChildren().add(buttonPane);
+            }
         }
 
-        StackPane stackPane = new StackPane();
-        stackPane.getChildren().add(vBox);
-        return stackPane;
+        generateButton.setVisible(empty && generatedMnemonicCode == null);
+        calculateButton.setDisable(!validChecksum);
+        validLabel.setVisible(validChecksum);
+        invalidLabel.setVisible(!validChecksum && !empty);
     }
 
     private void generateNew() {
         int mnemonicSeedLength = wordEntriesProperty.get().size() * 11;
         int entropyLength = mnemonicSeedLength - (mnemonicSeedLength/33);
 
-        DeterministicSeed deterministicSeed = new DeterministicSeed(new SecureRandom(), entropyLength, "");
+        SecureRandom secureRandom;
+        try {
+            secureRandom = SecureRandom.getInstanceStrong();
+        } catch(NoSuchAlgorithmException e) {
+            secureRandom = new SecureRandom();
+        }
+
+        DeterministicSeed deterministicSeed = new DeterministicSeed(secureRandom, entropyLength, "");
         generatedMnemonicCode = deterministicSeed.getMnemonicCode();
 
         displayMnemonicCode();
@@ -312,7 +202,7 @@ public class MnemonicKeystoreImportPane extends TitledDescriptionPane {
 
         StackPane wordsPane = (StackPane)getContent();
         StackPane confirmPane = new StackPane();
-        confirmPane.setMaxWidth(300);
+        confirmPane.setMaxWidth(350);
         confirmPane.setMaxHeight(100);
         Region region = new Region();
         region.setMinWidth(confirmPane.getMaxWidth());
@@ -333,7 +223,7 @@ public class MnemonicKeystoreImportPane extends TitledDescriptionPane {
     private void confirmBackup() {
         setDescription("Confirm backup by re-entering words");
         showHideLink.setVisible(false);
-        setContent(getMnemonicWordsEntry(wordEntriesProperty.get().size(), false));
+        setContent(getMnemonicWordsEntry(wordEntriesProperty.get().size()));
         setExpanded(true);
         backButton.setVisible(true);
         generateButton.setVisible(false);
@@ -352,7 +242,7 @@ public class MnemonicKeystoreImportPane extends TitledDescriptionPane {
             importButton.setDisable(false);
             setDescription("Ready to import");
             showHideLink.setText("Show Derivation...");
-            showHideLink.setVisible(true);
+            showHideLink.setVisible(false);
             setContent(getDerivationEntry(wallet.getScriptType().getDefaultDerivation()));
         }
     }
@@ -362,6 +252,14 @@ public class MnemonicKeystoreImportPane extends TitledDescriptionPane {
         try {
             Keystore keystore = importer.getKeystore(derivation, wordEntriesProperty.get(), passphraseProperty.get());
             if(!dryrun) {
+                if(passphraseProperty.get() != null && !passphraseProperty.get().isEmpty()) {
+                    KeystorePassphraseDialog keystorePassphraseDialog = new KeystorePassphraseDialog(null, keystore, true);
+                    Optional<String> optPassphrase = keystorePassphraseDialog.showAndWait();
+                    if(optPassphrase.isEmpty() || !optPassphrase.get().equals(passphraseProperty.get())) {
+                        throw new ImportException("Re-entered passphrase did not match");
+                    }
+                }
+
                 EventManager.get().post(new KeystoreImportEvent(keystore));
             }
             return true;
@@ -372,96 +270,9 @@ public class MnemonicKeystoreImportPane extends TitledDescriptionPane {
             } else if(e.getCause() != null && e.getCause().getMessage() != null && !e.getCause().getMessage().isEmpty()) {
                 errorMessage = e.getCause().getMessage();
             }
-            setError("Import Error", errorMessage);
+            setError("Import Error", errorMessage + ".");
             importButton.setDisable(false);
             return false;
-        }
-    }
-
-    private static class WordEntry extends HBox {
-        private static List<String> wordList;
-        private final TextField wordField;
-
-        public WordEntry(int wordNumber, ObservableList<String> wordEntryList) {
-            super();
-            setAlignment(Pos.CENTER_RIGHT);
-
-            setSpacing(10);
-            Label label = new Label((wordNumber+1) + ".");
-            label.setPrefWidth(22);
-            label.setAlignment(Pos.CENTER_RIGHT);
-            wordField = new TextField();
-            wordField.setMaxWidth(100);
-
-            wordList = Bip39MnemonicCode.INSTANCE.getWordList();
-            AutoCompletionBinding<String> autoCompletionBinding = TextFields.bindAutoCompletion(wordField, new WordlistSuggestionProvider(wordList));
-            autoCompletionBinding.setDelay(50);
-
-            ValidationSupport validationSupport = new ValidationSupport();
-            validationSupport.registerValidator(wordField, Validator.combine(
-                    Validator.createEmptyValidator("Word is required"),
-                    (Control c, String newValue) -> ValidationResult.fromErrorIf( c, "Invalid word", !wordList.contains(newValue))
-            ));
-            validationSupport.setValidationDecorator(new StyleClassValidationDecoration());
-
-            wordField.textProperty().addListener((observable, oldValue, newValue) -> {
-                wordEntryList.set(wordNumber, newValue);
-            });
-
-            this.getChildren().addAll(label, wordField);
-        }
-
-        public TextField getEditor() {
-            return wordField;
-        }
-
-        public static boolean isValid(String word) {
-            return wordList.contains(word);
-        }
-    }
-
-    private static class WordlistSuggestionProvider implements Callback<AutoCompletionBinding.ISuggestionRequest, Collection<String>> {
-        private final List<String> wordList;
-
-        public WordlistSuggestionProvider(List<String> wordList) {
-            this.wordList = wordList;
-        }
-
-        @Override
-        public Collection<String> call(AutoCompletionBinding.ISuggestionRequest request) {
-            List<String> suggestions = new ArrayList<>();
-            if(!request.getUserText().isEmpty()) {
-                for(String word : wordList) {
-                    if(word.equals(request.getUserText())) {
-                        return Collections.emptyList();
-                    }
-
-                    if(word.startsWith(request.getUserText())) {
-                        suggestions.add(word);
-                    }
-                }
-            }
-
-            return suggestions;
-        }
-    }
-
-    private class PassphraseEntry extends HBox {
-        public PassphraseEntry() {
-            super();
-
-            setAlignment(Pos.CENTER_LEFT);
-            setSpacing(10);
-            Label passphraseLabel = new Label("Passphrase:");
-            CustomTextField passphraseField = (CustomTextField) TextFields.createClearableTextField();
-            passphraseProperty.bind(passphraseField.textProperty());
-            passphraseField.setPromptText("Leave blank for none");
-
-            HelpLabel helpLabel = new HelpLabel();
-            helpLabel.setStyle("-fx-padding: 0 0 0 0");
-            helpLabel.setHelpText("A passphrase provides optional added security - it is not stored so it must be remembered!");
-
-            getChildren().addAll(passphraseLabel, passphraseField, helpLabel);
         }
     }
 
@@ -472,13 +283,14 @@ public class MnemonicKeystoreImportPane extends TitledDescriptionPane {
         HBox.setHgrow(derivationField, Priority.ALWAYS);
 
         ValidationSupport validationSupport = new ValidationSupport();
+        validationSupport.setValidationDecorator(new StyleClassValidationDecoration());
         validationSupport.registerValidator(derivationField, Validator.combine(
                 Validator.createEmptyValidator("Derivation is required"),
                 (Control c, String newValue) -> ValidationResult.fromErrorIf( c, "Invalid derivation", !KeyDerivation.isValid(newValue))
         ));
-        validationSupport.setValidationDecorator(new StyleClassValidationDecoration());
 
-        Button importDerivationButton = new Button("Import");
+        Button importDerivationButton = new Button("Import Custom Derivation Keystore");
+        importDerivationButton.setDisable(true);
         importDerivationButton.setOnAction(event -> {
             showHideLink.setVisible(true);
             setExpanded(false);
@@ -487,7 +299,8 @@ public class MnemonicKeystoreImportPane extends TitledDescriptionPane {
         });
 
         derivationField.textProperty().addListener((observable, oldValue, newValue) -> {
-            importDerivationButton.setDisable(newValue.isEmpty() || !KeyDerivation.isValid(newValue));
+            importButton.setDisable(newValue.isEmpty() || !KeyDerivation.isValid(newValue) || !KeyDerivation.parsePath(newValue).equals(derivation));
+            importDerivationButton.setDisable(newValue.isEmpty() || !KeyDerivation.isValid(newValue) || KeyDerivation.parsePath(newValue).equals(derivation));
         });
 
         HBox contentBox = new HBox();
@@ -499,31 +312,5 @@ public class MnemonicKeystoreImportPane extends TitledDescriptionPane {
         contentBox.setPrefHeight(60);
 
         return contentBox;
-    }
-
-    private void showWordList(DeterministicSeed seed) {
-        List<String> words = seed.getMnemonicCode();
-        setContent(getMnemonicWordsEntry(words.size(), true));
-        setExpanded(true);
-
-        for (int i = 0; i < wordsPane.getChildren().size(); i++) {
-            WordEntry wordEntry = (WordEntry)wordsPane.getChildren().get(i);
-            wordEntry.getEditor().setText(words.get(i));
-            wordEntry.getEditor().setEditable(false);
-        }
-    }
-
-    public static Glyph getValidGlyph() {
-        Glyph validGlyph = new Glyph(FontAwesome5.FONT_NAME, FontAwesome5.Glyph.CHECK_CIRCLE);
-        validGlyph.getStyleClass().add("valid-checksum");
-        validGlyph.setFontSize(12);
-        return validGlyph;
-    }
-
-    public static Glyph getInvalidGlyph() {
-        Glyph invalidGlyph = new Glyph(FontAwesome5.FONT_NAME, FontAwesome5.Glyph.EXCLAMATION_CIRCLE);
-        invalidGlyph.getStyleClass().add("invalid-checksum");
-        invalidGlyph.setFontSize(12);
-        return invalidGlyph;
     }
 }

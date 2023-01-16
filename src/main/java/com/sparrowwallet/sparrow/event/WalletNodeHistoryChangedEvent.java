@@ -5,6 +5,7 @@ import com.sparrowwallet.drongo.wallet.Wallet;
 import com.sparrowwallet.drongo.wallet.WalletNode;
 import com.sparrowwallet.sparrow.net.ElectrumServer;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -19,8 +20,33 @@ public class WalletNodeHistoryChangedEvent {
     }
 
     public WalletNode getWalletNode(Wallet wallet) {
-        List<KeyPurpose> keyPurposes = List.of(KeyPurpose.RECEIVE, KeyPurpose.CHANGE);
-        for(KeyPurpose keyPurpose : keyPurposes) {
+        WalletNode changedNode = getNode(wallet);
+        if(changedNode != null) {
+            return changedNode;
+        }
+
+        for(Wallet childWallet : wallet.getChildWallets()) {
+            if(childWallet.isNested()) {
+                changedNode = getNode(childWallet);
+                if(changedNode != null) {
+                    return changedNode;
+                }
+            }
+        }
+
+        Wallet notificationWallet = wallet.getNotificationWallet();
+        if(notificationWallet != null) {
+            WalletNode notificationNode = notificationWallet.getNode(KeyPurpose.NOTIFICATION);
+            if(ElectrumServer.getScriptHash(notificationNode).equals(scriptHash)) {
+                return notificationNode;
+            }
+        }
+
+        return null;
+    }
+
+    private WalletNode getNode(Wallet wallet) {
+        for(KeyPurpose keyPurpose : KeyPurpose.DEFAULT_PURPOSES) {
             WalletNode changedNode = getWalletNode(wallet, keyPurpose);
             if(changedNode != null) {
                 return changedNode;
@@ -31,9 +57,9 @@ public class WalletNodeHistoryChangedEvent {
     }
 
     private WalletNode getWalletNode(Wallet wallet, KeyPurpose keyPurpose) {
-        WalletNode purposeNode  = wallet.getNode(keyPurpose);
-        for(WalletNode addressNode : purposeNode.getChildren()) {
-            if(ElectrumServer.getScriptHash(wallet, addressNode).equals(scriptHash)) {
+        WalletNode purposeNode = wallet.getNode(keyPurpose);
+        for(WalletNode addressNode : new ArrayList<>(purposeNode.getChildren())) {
+            if(ElectrumServer.getScriptHash(addressNode).equals(scriptHash)) {
                 return addressNode;
             }
         }

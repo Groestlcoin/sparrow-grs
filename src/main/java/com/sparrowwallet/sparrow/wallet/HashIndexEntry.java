@@ -7,7 +7,8 @@ import com.sparrowwallet.drongo.wallet.Status;
 import com.sparrowwallet.drongo.wallet.Wallet;
 import com.sparrowwallet.sparrow.EventManager;
 import com.sparrowwallet.sparrow.control.DateLabel;
-import com.sparrowwallet.sparrow.event.WalletEntryLabelChangedEvent;
+import com.sparrowwallet.sparrow.event.WalletEntryLabelsChangedEvent;
+import com.sparrowwallet.sparrow.io.Config;
 
 import java.util.Collections;
 import java.util.List;
@@ -19,14 +20,16 @@ public class HashIndexEntry extends Entry implements Comparable<HashIndexEntry> 
     private final KeyPurpose keyPurpose;
 
     public HashIndexEntry(Wallet wallet, BlockTransactionHashIndex hashIndex, Type type, KeyPurpose keyPurpose) {
-        super(wallet, hashIndex.getLabel(), hashIndex.getSpentBy() != null ? List.of(new HashIndexEntry(wallet, hashIndex.getSpentBy(), Type.INPUT, keyPurpose)) : Collections.emptyList());
+        super(wallet.isNested() ? wallet.getMasterWallet() : wallet, hashIndex.getLabel(), hashIndex.getSpentBy() != null ? List.of(new HashIndexEntry(wallet, hashIndex.getSpentBy(), Type.INPUT, keyPurpose)) : Collections.emptyList());
         this.hashIndex = hashIndex;
         this.type = type;
         this.keyPurpose = keyPurpose;
 
         labelProperty().addListener((observable, oldValue, newValue) -> {
-            hashIndex.setLabel(newValue);
-            EventManager.get().post(new WalletEntryLabelChangedEvent(wallet, this));
+            if(!Objects.equals(hashIndex.getLabel(), newValue)) {
+                hashIndex.setLabel(newValue);
+                EventManager.get().post(new WalletEntryLabelsChangedEvent(wallet, this));
+            }
         });
     }
 
@@ -43,7 +46,7 @@ public class HashIndexEntry extends Entry implements Comparable<HashIndexEntry> 
     }
 
     public BlockTransaction getBlockTransaction() {
-        return getWallet().getTransactions().get(hashIndex.getHash());
+        return getWallet().getWalletTransaction(hashIndex.getHash());
     }
 
     public String getDescription() {
@@ -58,12 +61,22 @@ public class HashIndexEntry extends Entry implements Comparable<HashIndexEntry> 
     }
 
     public boolean isSpendable() {
-        return !isSpent() && (hashIndex.getHeight() > 0 || getWallet().allInputsFromWallet(hashIndex.getHash())) && (hashIndex.getStatus() == null || hashIndex.getStatus() != Status.FROZEN);
+        return !isSpent() && (hashIndex.getHeight() > 0 || Config.get().isIncludeMempoolOutputs()) && (hashIndex.getStatus() == null || hashIndex.getStatus() != Status.FROZEN);
     }
 
     @Override
     public Long getValue() {
         return hashIndex.getValue();
+    }
+
+    @Override
+    public String getEntryType() {
+        return type == Type.INPUT ? "Input" : "Output";
+    }
+
+    @Override
+    public Function getWalletFunction() {
+        return Function.ADDRESSES;
     }
 
     public enum Type {
@@ -75,15 +88,15 @@ public class HashIndexEntry extends Entry implements Comparable<HashIndexEntry> 
         if (this == o) return true;
         if (!(o instanceof HashIndexEntry)) return false;
         HashIndexEntry that = (HashIndexEntry) o;
-        return getWallet().equals(that.getWallet()) &&
-                hashIndex.equals(that.hashIndex) &&
+        return super.equals(that) &&
+                hashIndex == that.hashIndex &&
                 type == that.type &&
                 keyPurpose == that.keyPurpose;
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(getWallet(), hashIndex, type, keyPurpose);
+        return Objects.hash(getWallet(), System.identityHashCode(hashIndex), type, keyPurpose);
     }
 
     @Override

@@ -13,11 +13,11 @@
 }
 
 .list-item:hover {
-    -fx-background-color: #4aa7e5;
+    -fx-background-color: linear-gradient(to right, #3da0e3, derive(#4aa7e5, 10%));
 }
 
 .list-item:selected {
-    -fx-background-color: #1e88cf;
+    -fx-background-color: linear-gradient(to right, #3da0e3, derive(#1e88cf, -10%));
 }
 
 .list-item:disabled {
@@ -43,7 +43,7 @@
 }
 
 .transaction-row.confirming {
-    -fx-opacity: 0.8;
+    -fx-opacity: 0.7;
 }
 
 .utxo-row.unspendable {
@@ -56,6 +56,10 @@
 
 .tree-table-view:focused:row-selection .tree-table-row-cell:selected .utxo-row.unspendable {
     -fx-text-fill: derive(white, -15%);
+}
+
+.number-cell {
+    -fx-alignment: center-right;
 }
 
 .label-cell .text-field {
@@ -73,6 +77,14 @@
 .coin-cell .confirmation-progress {
     -fx-pref-width: 14;
     -fx-padding: 0 8 0 0;
+}
+
+.coin-cell.negative-amount {
+    -fx-text-fill: rgb(202, 18, 67);
+}
+
+.tree-table-row-cell:selected .coin-cell.negative-amount {
+    -fx-text-fill: white;
 }
 
 .confirmation-progress-circle, .confirmation-progress-tick {
@@ -101,18 +113,24 @@
 
 .entry-cell .button .label .text {
     -fx-fill: -fx-background;
+    visibility: hidden;
 }
 
 .entry-cell:hover .button .label .text {
     -fx-fill: -fx-text-base-color;
+    visibility: visible;
 }
 
 .tree-table-row-cell:selected .entry-cell:hover .button .label .text {
     -fx-fill: white;
 }
 
-.duplicate-warning {
+.duplicate-warning, .fail-warning {
     -fx-text-fill: rgb(202, 18, 67);
+}
+
+.dust-attack-warning {
+    -fx-text-fill: rgb(238, 210, 2);
 }
 
 .unused-check {

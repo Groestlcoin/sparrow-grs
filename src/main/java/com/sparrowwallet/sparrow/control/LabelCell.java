@@ -1,19 +1,25 @@
 package com.sparrowwallet.sparrow.control;
 
+import com.sparrowwallet.drongo.wallet.BlockTransactionHash;
 import com.sparrowwallet.sparrow.wallet.Entry;
+import javafx.beans.property.IntegerProperty;
+import javafx.beans.property.SimpleIntegerProperty;
 import javafx.event.Event;
 import javafx.scene.control.*;
 import javafx.scene.control.cell.TextFieldTreeTableCell;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
+import javafx.scene.input.DataFormat;
 import javafx.util.converter.DefaultStringConverter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.reflect.Field;
 
-class LabelCell extends TextFieldTreeTableCell<Entry, String> {
+class LabelCell extends TextFieldTreeTableCell<Entry, String> implements ConfirmationsListener {
     private static final Logger log = LoggerFactory.getLogger(LabelCell.class);
+
+    private IntegerProperty confirmationsProperty;
 
     public LabelCell() {
         super(new DefaultStringConverter());
@@ -28,10 +34,11 @@ class LabelCell extends TextFieldTreeTableCell<Entry, String> {
             setText(null);
             setGraphic(null);
         } else {
-            EntryCell.applyRowStyles(this, getTreeTableView().getTreeItem(getIndex()).getValue());
+            Entry entry = getTreeTableView().getTreeItem(getIndex()).getValue();
+            EntryCell.applyRowStyles(this, entry);
 
             setText(label);
-            setContextMenu(new LabelContextMenu(label));
+            setContextMenu(new LabelContextMenu(entry, label));
         }
     }
 
@@ -79,8 +86,23 @@ class LabelCell extends TextFieldTreeTableCell<Entry, String> {
         }
     }
 
+    @Override
+    public IntegerProperty getConfirmationsProperty() {
+        if(confirmationsProperty == null) {
+            confirmationsProperty = new SimpleIntegerProperty();
+            confirmationsProperty.addListener((observable, oldValue, newValue) -> {
+                if(newValue.intValue() >= BlockTransactionHash.BLOCKS_TO_CONFIRM) {
+                    getStyleClass().remove("confirming");
+                    confirmationsProperty.unbind();
+                }
+            });
+        }
+
+        return confirmationsProperty;
+    }
+
     private static class LabelContextMenu extends ContextMenu {
-        public LabelContextMenu(String label) {
+        public LabelContextMenu(Entry entry, String label) {
             MenuItem copyLabel = new MenuItem("Copy Label");
             copyLabel.setOnAction(AE -> {
                 hide();
@@ -88,8 +110,17 @@ class LabelCell extends TextFieldTreeTableCell<Entry, String> {
                 content.putString(label);
                 Clipboard.getSystemClipboard().setContent(content);
             });
-
             getItems().add(copyLabel);
+
+            MenuItem pasteLabel = new MenuItem("Paste Label");
+            pasteLabel.setOnAction(AE -> {
+                hide();
+                Object currentContent = Clipboard.getSystemClipboard().getContent(DataFormat.PLAIN_TEXT);
+                if(currentContent instanceof String) {
+                    entry.labelProperty().set((String)currentContent);
+                }
+            });
+            getItems().add(pasteLabel);
         }
     }
 }

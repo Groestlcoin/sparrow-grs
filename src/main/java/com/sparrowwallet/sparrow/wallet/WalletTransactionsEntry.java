@@ -1,12 +1,14 @@
 package com.sparrowwallet.sparrow.wallet;
 
 import com.sparrowwallet.drongo.KeyPurpose;
+import com.sparrowwallet.drongo.protocol.HashIndex;
 import com.sparrowwallet.drongo.wallet.BlockTransaction;
 import com.sparrowwallet.drongo.wallet.BlockTransactionHashIndex;
 import com.sparrowwallet.drongo.wallet.Wallet;
 import com.sparrowwallet.drongo.wallet.WalletNode;
 import com.sparrowwallet.sparrow.EventManager;
 import com.sparrowwallet.sparrow.event.NewWalletTransactionsEvent;
+import com.sparrowwallet.sparrow.io.Config;
 import javafx.beans.property.LongProperty;
 import javafx.beans.property.LongPropertyBase;
 import org.slf4j.Logger;
@@ -20,7 +22,7 @@ public class WalletTransactionsEntry extends Entry {
 
     public WalletTransactionsEntry(Wallet wallet) {
         super(wallet, wallet.getName(), getWalletTransactions(wallet).stream().map(WalletTransaction::getTransactionEntry).collect(Collectors.toList()));
-        calculateBalances();
+        calculateBalances(false); //No need to resort
     }
 
     @Override
@@ -28,18 +30,32 @@ public class WalletTransactionsEntry extends Entry {
         return getBalance();
     }
 
-    protected void calculateBalances() {
+    @Override
+    public String getEntryType() {
+        return "Wallet Transactions";
+    }
+
+    @Override
+    public Function getWalletFunction() {
+        return Function.TRANSACTIONS;
+    }
+
+    private void calculateBalances(boolean resort) {
         long balance = 0L;
         long mempoolBalance = 0L;
 
-        //Note transaction entries must be in ascending order. This sorting is ultimately done according to BlockTransactions' comparator
-        getChildren().sort(Comparator.comparing(TransactionEntry.class::cast));
+        if(resort) {
+            //Note transaction entries must be in ascending order. This sorting is ultimately done according to BlockTransactions' comparator
+            getChildren().sort(Comparator.comparing(TransactionEntry.class::cast));
+        }
 
         for(Entry entry : getChildren()) {
             TransactionEntry transactionEntry = (TransactionEntry)entry;
-            if(transactionEntry.getConfirmations() != 0) {
+            if(transactionEntry.getConfirmations() != 0 || transactionEntry.getValue() < 0 || Config.get().isIncludeMempoolOutputs()) {
                 balance += entry.getValue();
-            } else {
+            }
+
+            if(transactionEntry.getConfirmations() == 0) {
                 mempoolBalance += entry.getValue();
             }
 
@@ -51,6 +67,9 @@ public class WalletTransactionsEntry extends Entry {
     }
 
     public void updateTransactions() {
+        Map<HashIndex, BlockTransactionHashIndex> walletTxos = getWallet().getWalletTxos().entrySet().stream()
+                .collect(Collectors.toUnmodifiableMap(entry -> new HashIndex(entry.getKey().getHash(), entry.getKey().getIndex()), Map.Entry::getKey));
+
         List<Entry> current = getWalletTransactions(getWallet()).stream().map(WalletTransaction::getTransactionEntry).collect(Collectors.toList());
         List<Entry> previous = new ArrayList<>(getChildren());
 
@@ -62,14 +81,11 @@ public class WalletTransactionsEntry extends Entry {
         entriesRemoved.removeAll(current);
         getChildren().removeAll(entriesRemoved);
 
-        calculateBalances();
+        calculateBalances(true);
 
-        List<Entry> entriesComplete = entriesAdded.stream().filter(txEntry -> ((TransactionEntry)txEntry).isComplete()).collect(Collectors.toList());
+        List<Entry> entriesComplete = entriesAdded.stream().filter(txEntry -> ((TransactionEntry)txEntry).isComplete(walletTxos)).collect(Collectors.toList());
         if(!entriesComplete.isEmpty()) {
-            List<BlockTransaction> blockTransactions = entriesAdded.stream().map(txEntry -> ((TransactionEntry)txEntry).getBlockTransaction()).collect(Collectors.toList());
-            long totalBlockchainValue = entriesAdded.stream().filter(txEntry -> ((TransactionEntry)txEntry).getConfirmations() > 0).mapToLong(Entry::getValue).sum();
-            long totalMempoolValue = entriesAdded.stream().filter(txEntry -> ((TransactionEntry)txEntry).getConfirmations() == 0).mapToLong(Entry::getValue).sum();
-            EventManager.get().post(new NewWalletTransactionsEvent(getWallet(), blockTransactions, totalBlockchainValue, totalMempoolValue));
+            EventManager.get().post(new NewWalletTransactionsEvent(getWallet(), entriesAdded.stream().map(entry -> (TransactionEntry)entry).collect(Collectors.toList())));
         }
 
         if(entriesAdded.size() > entriesComplete.size()) {
@@ -77,25 +93,38 @@ public class WalletTransactionsEntry extends Entry {
             for(Entry entry : entriesAdded) {
                 TransactionEntry txEntry = (TransactionEntry)entry;
                 getChildren().remove(txEntry);
-                log.warn("Removing and not notifying incomplete entry " + ((TransactionEntry)entry).getBlockTransaction().getHashAsString() + " value " + txEntry.getValue());
+                log.warn("Removing and not notifying incomplete entry " + ((TransactionEntry)entry).getBlockTransaction().getHashAsString() + " value " + txEntry.getValue()
+                        + " children " + entry.getChildren().stream().map(e -> e.getEntryType() + " " + ((HashIndexEntry)e).getHashIndex()).collect(Collectors.toList()));
             }
         }
     }
 
     private static Collection<WalletTransaction> getWalletTransactions(Wallet wallet) {
-        Map<BlockTransaction, WalletTransaction> walletTransactionMap = new TreeMap<>();
+        Map<BlockTransaction, WalletTransaction> walletTransactionMap = new HashMap<>(wallet.getTransactions().size());
 
-        getWalletTransactions(wallet, walletTransactionMap, wallet.getNode(KeyPurpose.RECEIVE));
-        getWalletTransactions(wallet, walletTransactionMap, wallet.getNode(KeyPurpose.CHANGE));
+        for(KeyPurpose keyPurpose : wallet.getWalletKeyPurposes()) {
+            getWalletTransactions(wallet, walletTransactionMap, wallet.getNode(keyPurpose));
+        }
 
-        return new ArrayList<>(walletTransactionMap.values());
+        for(Wallet childWallet : wallet.getChildWallets()) {
+            if(childWallet.isNested()) {
+                for(KeyPurpose keyPurpose : childWallet.getWalletKeyPurposes()) {
+                    getWalletTransactions(childWallet, walletTransactionMap, childWallet.getNode(keyPurpose));
+                }
+            }
+        }
+
+        List<WalletTransaction> walletTransactions = new ArrayList<>(walletTransactionMap.values());
+        Collections.sort(walletTransactions);
+        return walletTransactions;
     }
 
     private static void getWalletTransactions(Wallet wallet, Map<BlockTransaction, WalletTransaction> walletTransactionMap, WalletNode purposeNode) {
         KeyPurpose keyPurpose = purposeNode.getKeyPurpose();
-        for(WalletNode addressNode : purposeNode.getChildren()) {
+        List<WalletNode> childNodes = new ArrayList<>(purposeNode.getChildren());
+        for(WalletNode addressNode : childNodes) {
             for(BlockTransactionHashIndex hashIndex : addressNode.getTransactionOutputs()) {
-                BlockTransaction inputTx = wallet.getTransactions().get(hashIndex.getHash());
+                BlockTransaction inputTx = wallet.getWalletTransaction(hashIndex.getHash());
                 //A null inputTx here means the wallet is still updating - ignore as the WalletHistoryChangedEvent will run this again
                 if(inputTx != null) {
                     WalletTransaction inputWalletTx = walletTransactionMap.get(inputTx);
@@ -106,7 +135,7 @@ public class WalletTransactionsEntry extends Entry {
                     inputWalletTx.incoming.put(hashIndex, keyPurpose);
 
                     if(hashIndex.getSpentBy() != null) {
-                        BlockTransaction outputTx = wallet.getTransactions().get(hashIndex.getSpentBy().getHash());
+                        BlockTransaction outputTx = wallet.getWalletTransaction(hashIndex.getSpentBy().getHash());
                         if(outputTx != null) {
                             WalletTransaction outputWalletTx = walletTransactionMap.get(outputTx);
                             if(outputWalletTx == null) {
@@ -187,7 +216,7 @@ public class WalletTransactionsEntry extends Entry {
         return mempoolBalance;
     }
 
-    private static class WalletTransaction {
+    private static class WalletTransaction implements Comparable<WalletTransaction> {
         private final Wallet wallet;
         private final BlockTransaction blockTransaction;
         private final Map<BlockTransactionHashIndex, KeyPurpose> incoming = new TreeMap<>();
@@ -200,6 +229,36 @@ public class WalletTransactionsEntry extends Entry {
 
         public TransactionEntry getTransactionEntry() {
             return new TransactionEntry(wallet, blockTransaction, incoming, outgoing);
+        }
+
+        public long getValue() {
+            long value = 0L;
+            for(BlockTransactionHashIndex in : incoming.keySet()) {
+                value += in.getValue();
+            }
+            for(BlockTransactionHashIndex out : outgoing.keySet()) {
+                value -= out.getValue();
+            }
+
+            return value;
+        }
+
+        @Override
+        public int compareTo(WalletTransactionsEntry.WalletTransaction other) {
+            //This comparison must be identical to that of TransactionEntry so we can avoid a resort calculating balances when creating WalletTransactionsEntry
+            if(blockTransaction.getHeight() != other.blockTransaction.getHeight()) {
+                int blockOrder = blockTransaction.getComparisonHeight() - other.blockTransaction.getComparisonHeight();
+                if(blockOrder != 0) {
+                    return blockOrder;
+                }
+            }
+
+            int valueOrder = Long.compare(other.getValue(), getValue());
+            if(valueOrder != 0) {
+                return valueOrder;
+            }
+
+            return blockTransaction.getHash().compareTo(other.blockTransaction.getHash());
         }
     }
 }

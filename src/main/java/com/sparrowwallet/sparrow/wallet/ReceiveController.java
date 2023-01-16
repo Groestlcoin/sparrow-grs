@@ -7,20 +7,16 @@ import com.google.zxing.client.j2se.MatrixToImageConfig;
 import com.google.zxing.client.j2se.MatrixToImageWriter;
 import com.google.zxing.common.BitMatrix;
 import com.google.zxing.qrcode.QRCodeWriter;
-import com.sparrowwallet.drongo.KeyDerivation;
 import com.sparrowwallet.drongo.KeyPurpose;
-import com.sparrowwallet.drongo.policy.PolicyType;
+import com.sparrowwallet.drongo.OutputDescriptor;
+import com.sparrowwallet.drongo.address.Address;
 import com.sparrowwallet.drongo.wallet.BlockTransactionHashIndex;
-import com.sparrowwallet.drongo.wallet.Keystore;
 import com.sparrowwallet.drongo.wallet.KeystoreSource;
 import com.sparrowwallet.drongo.wallet.Wallet;
 import com.sparrowwallet.sparrow.AppServices;
 import com.sparrowwallet.sparrow.EventManager;
 import com.sparrowwallet.sparrow.control.*;
-import com.sparrowwallet.sparrow.event.ReceiveToEvent;
-import com.sparrowwallet.sparrow.event.UsbDeviceEvent;
-import com.sparrowwallet.sparrow.event.WalletHistoryChangedEvent;
-import com.sparrowwallet.sparrow.event.WalletNodesChangedEvent;
+import com.sparrowwallet.sparrow.event.*;
 import com.sparrowwallet.sparrow.glyphfont.FontAwesome5;
 import com.sparrowwallet.sparrow.io.Device;
 import com.sparrowwallet.sparrow.io.Hwi;
@@ -28,11 +24,10 @@ import javafx.application.Platform;
 import javafx.event.ActionEvent;
 import javafx.fxml.FXML;
 import javafx.fxml.Initializable;
-import javafx.scene.control.Button;
-import javafx.scene.control.Label;
-import javafx.scene.control.TextField;
+import javafx.scene.control.*;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
+import javafx.stage.Stage;
 import org.controlsfx.glyphfont.Glyph;
 import org.fxmisc.richtext.CodeArea;
 import org.slf4j.Logger;
@@ -43,10 +38,7 @@ import java.io.ByteArrayOutputStream;
 import java.net.URL;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
-import java.util.List;
-import java.util.Map;
-import java.util.ResourceBundle;
-import java.util.Set;
+import java.util.*;
 import java.util.stream.Collectors;
 
 public class ReceiveController extends WalletFormController implements Initializable {
@@ -91,6 +83,15 @@ public class ReceiveController extends WalletFormController implements Initializ
 
         displayAddress.managedProperty().bind(displayAddress.visibleProperty());
         displayAddress.setVisible(false);
+
+        qrCode.setOnMouseClicked(event -> {
+            if(currentEntry != null) {
+                QRDisplayDialog qrDisplayDialog = new QRDisplayDialog(currentEntry.getAddress().toString());
+                qrDisplayDialog.showAndWait();
+            }
+        });
+
+        refreshAddress();
     }
 
     public void setNodeEntry(NodeEntry nodeEntry) {
@@ -120,20 +121,7 @@ public class ReceiveController extends WalletFormController implements Initializ
     }
 
     private void updateDerivationPath(NodeEntry nodeEntry) {
-        KeyDerivation firstDerivation = getWalletForm().getWallet().getKeystores().get(0).getKeyDerivation();
-        boolean singleDerivationPath = true;
-        for(Keystore keystore : getWalletForm().getWallet().getKeystores()) {
-            if(!keystore.getKeyDerivation().getDerivationPath().equals(firstDerivation.getDerivationPath())) {
-                singleDerivationPath = false;
-                break;
-            }
-        }
-
-        if(singleDerivationPath) {
-            derivationPath.setText(firstDerivation.extend(nodeEntry.getNode().getDerivation()).getDerivationPath());
-        } else {
-            derivationPath.setText(nodeEntry.getNode().getDerivationPath().replace("m", "multi"));
-        }
+        derivationPath.setText(getDerivationPath(nodeEntry.getNode()));
     }
 
     private void updateLastUsed() {
@@ -141,38 +129,43 @@ public class ReceiveController extends WalletFormController implements Initializ
         if(AppServices.isConnected() && currentOutputs.isEmpty()) {
             lastUsed.setText("Never");
             lastUsed.setGraphic(getUnusedGlyph());
+            address.getStyleClass().remove("error");
         } else if(!currentOutputs.isEmpty()) {
             long count = currentOutputs.size();
             BlockTransactionHashIndex lastUsedReference = currentOutputs.stream().skip(count - 1).findFirst().get();
-            lastUsed.setText(lastUsedReference.getHeight() <= 0 ? "Unconfirmed Transaction" : DATE_FORMAT.format(lastUsedReference.getDate()));
+            lastUsed.setText(lastUsedReference.getHeight() <= 0 ? "Unconfirmed Transaction" : (lastUsedReference.getDate() == null ? "Unknown" : DATE_FORMAT.format(lastUsedReference.getDate())));
             lastUsed.setGraphic(getWarningGlyph());
+            if(!address.getStyleClass().contains("error")) {
+                address.getStyleClass().add("error");
+            }
         } else {
             lastUsed.setText("Unknown");
-            lastUsed.setGraphic(null);
+            lastUsed.setGraphic(getUnknownGlyph());
+            address.getStyleClass().remove("error");
         }
     }
 
     private void updateDisplayAddress(List<Device> devices) {
-        //Can only display address for single sig wallets. See https://github.com/bitcoin-core/HWI/issues/224
         Wallet wallet = getWalletForm().getWallet();
-        if(wallet.getPolicyType().equals(PolicyType.SINGLE)) {
-            List<Device> addressDevices = devices.stream().filter(device -> wallet.getKeystores().get(0).getKeyDerivation().getMasterFingerprint().equals(device.getFingerprint())).collect(Collectors.toList());
-            if(addressDevices.isEmpty()) {
-                addressDevices = devices.stream().filter(device -> device.getNeedsPinSent() || device.getNeedsPassphraseSent()).collect(Collectors.toList());
-            }
+        OutputDescriptor walletDescriptor = OutputDescriptor.getOutputDescriptor(walletForm.getWallet());
+        List<String> walletFingerprints = walletDescriptor.getExtendedPublicKeys().stream().map(extKey -> walletDescriptor.getKeyDerivation(extKey).getMasterFingerprint()).collect(Collectors.toList());
 
-            if(!addressDevices.isEmpty()) {
-                if(currentEntry != null) {
-                    displayAddress.setVisible(true);
-                }
+        List<Device> addressDevices = devices.stream().filter(device -> walletFingerprints.contains(device.getFingerprint())).collect(Collectors.toList());
+        if(addressDevices.isEmpty()) {
+            addressDevices = devices.stream().filter(device -> device.isNeedsPinSent() || device.isNeedsPassphraseSent()).collect(Collectors.toList());
+        }
 
-                displayAddress.setUserData(addressDevices);
-                return;
-            } else if(currentEntry != null && wallet.getKeystores().stream().anyMatch(keystore -> keystore.getSource().equals(KeystoreSource.HW_USB))) {
+        if(!addressDevices.isEmpty()) {
+            if(currentEntry != null) {
                 displayAddress.setVisible(true);
-                displayAddress.setUserData(null);
-                return;
             }
+
+            displayAddress.setUserData(addressDevices);
+            return;
+        } else if(currentEntry != null && wallet.getKeystores().stream().anyMatch(keystore -> keystore.getSource().equals(KeystoreSource.HW_USB))) {
+            displayAddress.setVisible(true);
+            displayAddress.setUserData(null);
+            return;
         }
 
         displayAddress.setVisible(false);
@@ -197,6 +190,10 @@ public class ReceiveController extends WalletFormController implements Initializ
     }
 
     public void getNewAddress(ActionEvent event) {
+        refreshAddress();
+    }
+
+    public void refreshAddress() {
         NodeEntry freshEntry = getWalletForm().getFreshNodeEntry(KeyPurpose.RECEIVE, currentEntry);
         setNodeEntry(freshEntry);
     }
@@ -204,28 +201,27 @@ public class ReceiveController extends WalletFormController implements Initializ
     @SuppressWarnings("unchecked")
     public void displayAddress(ActionEvent event) {
         Wallet wallet = getWalletForm().getWallet();
-        if(wallet.getPolicyType() == PolicyType.SINGLE && currentEntry != null) {
-            Keystore keystore = wallet.getKeystores().get(0);
-            KeyDerivation fullDerivation = keystore.getKeyDerivation().extend(currentEntry.getNode().getDerivation());
+        if(currentEntry != null) {
+            OutputDescriptor addressDescriptor = OutputDescriptor.getOutputDescriptor(walletForm.getWallet(), currentEntry.getNode().getKeyPurpose(), currentEntry.getNode().getIndex());
 
             List<Device> possibleDevices = (List<Device>)displayAddress.getUserData();
             if(possibleDevices != null && !possibleDevices.isEmpty()) {
-                if(possibleDevices.size() > 1 || possibleDevices.get(0).getNeedsPinSent() || possibleDevices.get(0).getNeedsPassphraseSent()) {
-                    DeviceAddressDialog dlg = new DeviceAddressDialog(List.of(keystore.getKeyDerivation().getMasterFingerprint()), wallet, fullDerivation);
+                if(possibleDevices.size() > 1 || possibleDevices.get(0).isNeedsPinSent() || possibleDevices.get(0).isNeedsPassphraseSent()) {
+                    DeviceAddressDialog dlg = new DeviceAddressDialog(wallet, addressDescriptor);
                     dlg.showAndWait();
                 } else {
                     Device actualDevice = possibleDevices.get(0);
-                    Hwi.DisplayAddressService displayAddressService = new Hwi.DisplayAddressService(actualDevice, "", wallet.getScriptType(), fullDerivation.getDerivationPath());
+                    Hwi.DisplayAddressService displayAddressService = new Hwi.DisplayAddressService(actualDevice, "", wallet.getScriptType(), addressDescriptor);
                     displayAddressService.setOnFailed(failedEvent -> {
                         Platform.runLater(() -> {
-                            DeviceAddressDialog dlg = new DeviceAddressDialog(List.of(keystore.getKeyDerivation().getMasterFingerprint()), wallet, fullDerivation);
+                            DeviceAddressDialog dlg = new DeviceAddressDialog(wallet, addressDescriptor);
                             dlg.showAndWait();
                         });
                     });
                     displayAddressService.start();
                 }
             } else {
-                DeviceAddressDialog dlg = new DeviceAddressDialog(List.of(keystore.getKeyDerivation().getMasterFingerprint()), wallet, fullDerivation);
+                DeviceAddressDialog dlg = new DeviceAddressDialog(wallet, addressDescriptor);
                 dlg.showAndWait();
             }
         }
@@ -261,6 +257,17 @@ public class ReceiveController extends WalletFormController implements Initializ
         return duplicateGlyph;
     }
 
+    public static Glyph getUnknownGlyph() {
+        Glyph duplicateGlyph = new Glyph(FontAwesome5.FONT_NAME, FontAwesome5.Glyph.QUESTION_CIRCLE);
+        duplicateGlyph.setFontSize(12);
+        return duplicateGlyph;
+    }
+
+    @Subscribe
+    public void walletAddressesChanged(WalletAddressesChangedEvent event) {
+        displayAddress.setUserData(null);
+    }
+
     @Subscribe
     public void receiveTo(ReceiveToEvent event) {
         if(event.getReceiveEntry().getWallet().equals(getWalletForm().getWallet())) {
@@ -271,7 +278,11 @@ public class ReceiveController extends WalletFormController implements Initializ
     @Subscribe
     public void walletNodesChanged(WalletNodesChangedEvent event) {
         if(event.getWallet().equals(walletForm.getWallet())) {
-            clear();
+            if(currentEntry != null) {
+                label.textProperty().unbindBidirectional(currentEntry.labelProperty());
+                currentEntry = null;
+            }
+            refreshAddress();
         }
     }
 
@@ -279,7 +290,7 @@ public class ReceiveController extends WalletFormController implements Initializ
     public void walletHistoryChanged(WalletHistoryChangedEvent event) {
         if(event.getWallet().equals(walletForm.getWallet())) {
             if(currentEntry != null && event.getHistoryChangedNodes().contains(currentEntry.getNode())) {
-                updateLastUsed();
+                refreshAddress();
             }
         }
     }
@@ -287,5 +298,15 @@ public class ReceiveController extends WalletFormController implements Initializ
     @Subscribe
     public void usbDevicesFound(UsbDeviceEvent event) {
         updateDisplayAddress(event.getDevices());
+    }
+
+    @Subscribe
+    public void connection(ConnectionEvent event) {
+        updateLastUsed();
+    }
+
+    @Subscribe
+    public void disconnection(DisconnectionEvent event) {
+        updateLastUsed();
     }
 }
