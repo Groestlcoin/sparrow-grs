@@ -2,6 +2,7 @@ package com.sparrowwallet.sparrow.net.cormorant.bitcoind;
 
 import com.github.arteam.simplejsonrpc.client.JsonRpcClient;
 import com.github.arteam.simplejsonrpc.client.exception.JsonRpcException;
+import com.google.common.collect.Sets;
 import com.sparrowwallet.drongo.KeyPurpose;
 import com.sparrowwallet.drongo.OutputDescriptor;
 import com.sparrowwallet.drongo.Utils;
@@ -25,11 +26,14 @@ import com.sparrowwallet.sparrow.net.cormorant.electrum.ScriptHashStatus;
 import com.sparrowwallet.sparrow.net.cormorant.index.Store;
 import com.sparrowwallet.drongo.protocol.*;
 import javafx.application.Platform;
+import javafx.concurrent.Service;
+import javafx.concurrent.Task;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
@@ -60,8 +64,8 @@ public class BitcoindClient {
 
     private Exception lastPollException;
 
+    private final boolean useWallets;
     private boolean pruned;
-    private boolean prunedWarningShown = false;
     private boolean legacyWalletExists;
 
     private final Lock syncingLock = new ReentrantLock();
@@ -75,7 +79,13 @@ public class BitcoindClient {
     private final Condition initialImportCondition = initialImportLock.newCondition();
     private boolean initialImportStarted;
 
-    public BitcoindClient() {
+    private final List<String> pruneWarnedDescriptors = new ArrayList<>();
+
+    private final Map<Sha256Hash, VsizeFeerate> mempoolEntries = new ConcurrentHashMap<>();
+    private MempoolEntriesState mempoolEntriesState = MempoolEntriesState.UNINITIALIZED;
+    private long timerTaskCount;
+
+    public BitcoindClient(boolean useWallets) {
         BitcoindTransport bitcoindTransport;
 
         Config config = Config.get();
@@ -86,6 +96,7 @@ public class BitcoindClient {
         }
 
         this.jsonRpcClient = new JsonRpcClient(bitcoindTransport);
+        this.useWallets = useWallets;
     }
 
     public void initialize() throws CormorantBitcoindException {
@@ -124,17 +135,20 @@ public class BitcoindClient {
         }
 
         ListWalletDirResult listWalletDirResult = getBitcoindService().listWalletDir();
+        if(listWalletDirResult == null) {
+            throw new RuntimeException("Wallet support must be enabled in Bitcoin Core");
+        }
         boolean exists = listWalletDirResult.wallets().stream().anyMatch(walletDirResult -> walletDirResult.name().equals(CORE_WALLET_NAME));
         legacyWalletExists = listWalletDirResult.wallets().stream().anyMatch(walletDirResult -> walletDirResult.name().equals(Bwt.DEFAULT_CORE_WALLET));
 
-        if(!exists) {
-            getBitcoindService().createWallet(CORE_WALLET_NAME, true, true, "", true, true, false, false);
+        List<String> loadedWallets = getBitcoindService().listWallets();
+        boolean loaded = loadedWallets.contains(CORE_WALLET_NAME);
+
+        if(!exists && !loaded) {
+            getBitcoindService().createWallet(CORE_WALLET_NAME, true, true, "", true, true, true, false);
         } else {
-            try {
-                getBitcoindService().loadWallet(CORE_WALLET_NAME, false);
-            } catch(JsonRpcException e) {
-                getBitcoindService().unloadWallet(CORE_WALLET_NAME, false);
-                getBitcoindService().loadWallet(CORE_WALLET_NAME, false);
+            if(!loaded) {
+                getBitcoindService().loadWallet(CORE_WALLET_NAME, true);
             }
         }
 
@@ -147,7 +161,20 @@ public class BitcoindClient {
     }
 
     public void importWallets(Collection<Wallet> wallets) throws ImportFailedException {
-        importDescriptors(getWalletDescriptors(wallets));
+        try {
+            importDescriptors(getWalletDescriptors(wallets));
+        } catch(ScanDateBeforePruneException e) {
+            List<Wallet> prePruneWallets = wallets.stream()
+                    .filter(wallet -> wallet.getBirthDate() != null && wallet.getBirthDate().before(e.getPrunedDate()) && wallet.isValid()
+                            && !pruneWarnedDescriptors.contains(e.getDescriptor())
+                            && OutputDescriptor.getOutputDescriptor(wallet, KeyPurpose.RECEIVE).toString(false, true).equals(e.getDescriptor()))
+                    .sorted(Comparator.comparingLong(o -> o.getBirthDate().getTime())).collect(Collectors.toList());
+            if(!prePruneWallets.isEmpty()) {
+                pruneWarnedDescriptors.add(e.getDescriptor());
+                Platform.runLater(() -> EventManager.get().post(new CormorantPruneStatusEvent("Error: Wallet birthday earlier than Bitcoin Core prune date", prePruneWallets.get(0), e.getRescanSince(), e.getPrunedDate(), legacyWalletExists)));
+            }
+            throw new ImportFailedException("Wallet birthday earlier than prune date");
+        }
     }
 
     public void importWallet(Wallet wallet) throws ImportFailedException {
@@ -155,43 +182,44 @@ public class BitcoindClient {
         importWallets(wallet.isMasterWallet() ? wallet.getAllWallets() : wallet.getMasterWallet().getAllWallets());
     }
 
+    public void importAddress(Address address, Date since) throws ImportFailedException {
+        Map<String, ScanDate> outputDescriptors = new HashMap<>();
+        String addressOutputDescriptor = OutputDescriptor.toDescriptorString(address);
+        outputDescriptors.put(OutputDescriptor.normalize(addressOutputDescriptor), new ScanDate(since, null, true));
+        try {
+            importDescriptors(outputDescriptors);
+        } catch(ScanDateBeforePruneException e) {
+            throw new ImportFailedException("Address birth date earlier than prune date.");
+        }
+    }
+
     private Map<String, ScanDate> getWalletDescriptors(Collection<Wallet> wallets) throws ImportFailedException {
         List<Wallet> validWallets = wallets.stream().filter(Wallet::isValid).collect(Collectors.toList());
 
-        Date earliestBirthDate = validWallets.stream().map(Wallet::getBirthDate).filter(Objects::nonNull).sorted().findFirst().orElse(null);
         Map<String, ScanDate> outputDescriptors = new LinkedHashMap<>();
         for(Wallet wallet : validWallets) {
-            if(pruned) {
-                Optional<Date> optPrunedDate = getPrunedDate();
-                if(optPrunedDate.isPresent() && earliestBirthDate != null) {
-                    Date prunedDate = optPrunedDate.get();
-                    if(earliestBirthDate.before(prunedDate)) {
-                        if(!prunedWarningShown) {
-                            prunedWarningShown = true;
-                            Platform.runLater(() -> EventManager.get().post(new CormorantPruneStatusEvent("Error: Wallet birthday earlier than Groestlcoin Core prune date", wallet, earliestBirthDate, prunedDate, legacyWalletExists)));
-                        }
-                        throw new ImportFailedException("Wallet birthday earlier than prune date");
-                    }
-                }
-            }
-
             String receiveOutputDescriptor = OutputDescriptor.getOutputDescriptor(wallet, KeyPurpose.RECEIVE).toString(false, false);
-            addOutputDescriptor(outputDescriptors, receiveOutputDescriptor, wallet, KeyPurpose.RECEIVE, earliestBirthDate);
+            addOutputDescriptor(outputDescriptors, receiveOutputDescriptor, wallet, KeyPurpose.RECEIVE, wallet.getBirthDate());
             String changeOutputDescriptor = OutputDescriptor.getOutputDescriptor(wallet, KeyPurpose.CHANGE).toString(false, false);
-            addOutputDescriptor(outputDescriptors, changeOutputDescriptor, wallet, KeyPurpose.CHANGE, earliestBirthDate);
+            addOutputDescriptor(outputDescriptors, changeOutputDescriptor, wallet, KeyPurpose.CHANGE, wallet.getBirthDate());
 
             if(wallet.isMasterWallet() && wallet.hasPaymentCode()) {
                 Wallet notificationWallet = wallet.getNotificationWallet();
                 WalletNode notificationNode = notificationWallet.getNode(KeyPurpose.NOTIFICATION);
                 String notificationOutputDescriptor = OutputDescriptor.toDescriptorString(notificationNode.getAddress());
-                addOutputDescriptor(outputDescriptors, notificationOutputDescriptor, wallet, null, earliestBirthDate);
+                addOutputDescriptor(outputDescriptors, notificationOutputDescriptor, wallet, null, wallet.getBirthDate());
 
                 for(Wallet childWallet : wallet.getChildWallets()) {
                     if(childWallet.isNested()) {
+                        Wallet copyChildWallet = childWallet.copy();
                         for(KeyPurpose keyPurpose : KeyPurpose.DEFAULT_PURPOSES) {
-                            for(WalletNode addressNode : childWallet.getNode(keyPurpose).getChildren()) {
+                            WalletNode purposeNode = copyChildWallet.getNode(keyPurpose);
+                            int addressCount = purposeNode.getChildren().size();
+                            int gapLimit = ((int)Math.floor(addressCount / 10.0) * 10) + 10;
+                            purposeNode.fillToIndex(gapLimit - 1);
+                            for(WalletNode addressNode : purposeNode.getChildren()) {
                                 String addressOutputDescriptor = OutputDescriptor.toDescriptorString(addressNode.getAddress());
-                                addOutputDescriptor(outputDescriptors, addressOutputDescriptor, childWallet, null, earliestBirthDate);
+                                addOutputDescriptor(outputDescriptors, addressOutputDescriptor, copyChildWallet, null, wallet.getBirthDate());
                             }
                         }
                     }
@@ -238,8 +266,10 @@ public class BitcoindClient {
         return wallet.getStandardAccountType() == StandardAccount.WHIRLPOOL_POSTMIX && keyPurpose == KeyPurpose.RECEIVE ? POSTMIX_GAP_LIMIT : DEFAULT_GAP_LIMIT;
     }
 
-    private void importDescriptors(Map<String, ScanDate> descriptors) {
-        for(String descriptor : descriptors.keySet()) {
+    private void importDescriptors(Map<String, ScanDate> descriptors) throws ScanDateBeforePruneException {
+        //Sort descriptors in alphanumeric order to avoid deadlocks, particularly with BIP47 wallets
+        Set<String> sortedDescriptors = new TreeSet<>(descriptors.keySet());
+        for(String descriptor : sortedDescriptors) {
             Lock lock = descriptorLocks.computeIfAbsent(descriptor, desc -> new ReentrantLock());
             lock.lock();
             descriptorBirthDates.put(descriptor, descriptors.get(descriptor).rescanSince);
@@ -261,15 +291,17 @@ public class BitcoindClient {
         }
     }
 
-    private Set<String> addDescriptors(Map<String, ScanDate> descriptors) {
+    private Set<String> addDescriptors(Map<String, ScanDate> descriptors) throws ScanDateBeforePruneException {
         boolean forceRescan = descriptors.values().stream().anyMatch(scanDate -> scanDate.forceRescan);
         if(!initialized || forceRescan) {
             ListDescriptorsResult listDescriptorsResult = getBitcoindService().listDescriptors(false);
             for(ListDescriptorResult result : listDescriptorsResult.descriptors()) {
                 String descriptor = OutputDescriptor.normalize(result.desc());
                 ScanDate previousScanDate = importedDescriptors.get(descriptor);
+                Date scanDate = result.getScanDate();
+                Date rescanSince = scanDate != null ? scanDate : (previousScanDate != null ? previousScanDate.rescanSince : null);
                 Integer range = result.range() == null ? null : result.range().get(result.range().size() - 1);
-                importedDescriptors.put(descriptor, new ScanDate(previousScanDate == null ? null : previousScanDate.rescanSince, range, false));
+                importedDescriptors.put(descriptor, new ScanDate(rescanSince, range, false));
             }
         }
 
@@ -289,8 +321,20 @@ public class BitcoindClient {
             }
         }
 
+        if(pruned) {
+            Optional<Date> optPrunedDate = getPrunedDate();
+            if(optPrunedDate.isPresent()) {
+                Date prunedDate = optPrunedDate.get();
+                Optional<Map.Entry<String, ScanDate>> optPrePruneImport = importingDescriptors.entrySet().stream().filter(entry -> entry.getValue().rescanSince != null && entry.getValue().rescanSince.before(prunedDate)).findFirst();
+                if(optPrePruneImport.isPresent()) {
+                    Map.Entry<String, ScanDate> prePruneImport = optPrePruneImport.get();
+                    throw new ScanDateBeforePruneException(prePruneImport.getKey(), prePruneImport.getValue().rescanSince, prunedDate);
+                }
+            }
+        }
+
         if(!importingDescriptors.isEmpty()) {
-            log.warn("Importing descriptors " + importingDescriptors);
+            log.debug("Importing descriptors " + importingDescriptors);
 
             List<ImportDescriptor> importDescriptors = importingDescriptors.entrySet().stream()
                     .map(entry -> {
@@ -332,15 +376,8 @@ public class BitcoindClient {
     }
 
     public void stop() {
-        if(initialized) {
-            try {
-                getBitcoindService().unloadWallet(CORE_WALLET_NAME, false);
-            } catch(Exception e) {
-                log.info("Error unloading Core wallet " + CORE_WALLET_NAME, e);
-            }
-        }
-
         timer.cancel();
+        pruneWarnedDescriptors.clear();
         stopped = true;
     }
 
@@ -388,7 +425,7 @@ public class BitcoindClient {
 
         for(ListTransaction sentTransaction : sentTransactions) {
             Set<HashIndex> spentOutputs = store.getSpentOutputs().computeIfAbsent(sentTransaction.txid(), txid -> {
-                String txhex = getBitcoindService().getRawTransaction(txid, false).toString();
+                String txhex = getTransaction(txid);
                 Transaction tx = new Transaction(Utils.hexToBytes(txhex));
                 return tx.getInputs().stream().map(txInput -> new HashIndex(txInput.getOutpoint().getHash(), txInput.getOutpoint().getIndex())).collect(Collectors.toSet());
             });
@@ -417,6 +454,14 @@ public class BitcoindClient {
 
         for(String updatedScriptHash : updatedScriptHashes) {
             Cormorant.getEventBus().post(new ScriptHashStatus(updatedScriptHash, store.getStatus(updatedScriptHash)));
+        }
+    }
+
+    private String getTransaction(String txid) {
+        try {
+            return getBitcoindService().getTransaction(txid, true, false).get("hex").toString();
+        } catch(JsonRpcException e) {
+            return getBitcoindService().getRawTransaction(txid, false).toString();
         }
     }
 
@@ -483,6 +528,66 @@ public class BitcoindClient {
         }
     }
 
+    public void initializeMempoolEntries() {
+        mempoolEntriesState = MempoolEntriesState.INITIALIZING;
+
+        long start = System.currentTimeMillis();
+        Set<Sha256Hash> txids = getBitcoindService().getRawMempool();
+        long end = System.currentTimeMillis();
+
+        if(end - start < 1000) {
+            //Fast system, fetch all mempool data at once
+            Map<Sha256Hash, VsizeFeerate> entries = getBitcoindService().getRawMempool(true).entrySet().stream()
+                    .collect(Collectors.toMap(Map.Entry::getKey, entry -> entry.getValue().getVsizeFeerate(), (u, v) -> u, HashMap::new));
+            mempoolEntries.putAll(entries);
+        } else {
+            //Slow system, fetch mempool entries one-by-one to avoid risking a node crash
+            for(Sha256Hash txid : txids) {
+                try {
+                    MempoolEntry mempoolEntry = getBitcoindService().getMempoolEntry(txid.toString());
+                    mempoolEntries.put(txid, mempoolEntry.getVsizeFeerate());
+                } catch(JsonRpcException e) {
+                    //ignore, probably tx has been removed from mempool
+                }
+            }
+        }
+
+        mempoolEntriesState = MempoolEntriesState.INITIALIZED;
+    }
+
+    public void updateMempoolEntries() {
+        Set<Sha256Hash> txids = getBitcoindService().getRawMempool();
+
+        Set<Sha256Hash> removed = new HashSet<>(Sets.difference(mempoolEntries.keySet(), txids));
+        mempoolEntries.keySet().removeAll(removed);
+
+        Set<Sha256Hash> added = Sets.difference(txids, mempoolEntries.keySet());
+        for(Sha256Hash txid : added) {
+            try {
+                MempoolEntry mempoolEntry = getBitcoindService().getMempoolEntry(txid.toString());
+                mempoolEntries.put(txid, mempoolEntry.getVsizeFeerate());
+            } catch(JsonRpcException e) {
+                //ignore, probably tx has been removed from mempool
+            }
+        }
+    }
+
+    public Map<Sha256Hash, VsizeFeerate> getMempoolEntries() {
+        return mempoolEntries;
+    }
+
+    public MempoolEntriesState getMempoolEntriesState() {
+        return mempoolEntriesState;
+    }
+
+    public InitializeMempoolEntriesService getInitializeMempoolEntriesService() {
+        return new InitializeMempoolEntriesService();
+    }
+
+    public boolean isUseWallets() {
+        return useWallets;
+    }
+
     public Store getStore() {
         return store;
     }
@@ -509,7 +614,7 @@ public class BitcoindClient {
             try {
                 if(syncing) {
                     BlockchainInfo blockchainInfo = getBitcoindService().getBlockchainInfo();
-                    if(blockchainInfo.initialblockdownload()) {
+                    if(blockchainInfo.initialblockdownload() && !isEmptyBlockchain(blockchainInfo)) {
                         int percent = blockchainInfo.getProgressPercent();
                         Date tipDate = blockchainInfo.getTip();
                         Platform.runLater(() -> EventManager.get().post(new CormorantSyncStatusEvent("Syncing" + (percent < 100 ? " (" + percent + "%)" : ""), percent, tipDate)));
@@ -531,6 +636,10 @@ public class BitcoindClient {
                         log.warn("Reorg detected, block height " + tip.height() + " was " + lastBlock + " and now is " + blockhash);
                         lastBlock = null;
                     }
+                }
+
+                if(mempoolEntriesState == MempoolEntriesState.INITIALIZED && (++timerTaskCount+1) % 12 == 0) {
+                    updateMempoolEntries();
                 }
 
                 ListSinceBlock listSinceBlock = getListSinceBlock(lastBlock);
@@ -558,7 +667,7 @@ public class BitcoindClient {
                 }
             } catch(Exception e) {
                 lastPollException = e;
-                log.warn("Error polling Groestlcoin Core: " + e.getMessage());
+                log.warn("Error polling Groestlcoin Core", e);
 
                 if(syncing) {
                     syncingLock.lock();
@@ -585,9 +694,30 @@ public class BitcoindClient {
         return scanningWallets;
     }
 
+    private boolean isEmptyBlockchain(BlockchainInfo blockchainInfo) {
+        return blockchainInfo.blocks() == 0 && blockchainInfo.getProgressPercent() == 100;
+    }
+
     private record ScanDate(Date rescanSince, Integer range, boolean forceRescan) {
         public Object getTimestamp() {
             return rescanSince == null ? "now" : rescanSince.getTime() / 1000;
         }
+    }
+
+    public class InitializeMempoolEntriesService extends Service<Void> {
+        @Override
+        protected Task<Void> createTask() {
+            return new Task<>() {
+                @Override
+                protected Void call() {
+                    initializeMempoolEntries();
+                    return null;
+                }
+            };
+        }
+    }
+
+    public enum MempoolEntriesState {
+        UNINITIALIZED, INITIALIZING, INITIALIZED
     }
 }

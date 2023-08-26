@@ -2,6 +2,7 @@ package com.sparrowwallet.sparrow.control;
 
 import com.sparrowwallet.drongo.BitcoinUnit;
 import com.sparrowwallet.drongo.wallet.Wallet;
+import com.sparrowwallet.sparrow.CurrencyRate;
 import com.sparrowwallet.sparrow.UnitFormat;
 import com.sparrowwallet.sparrow.AppServices;
 import com.sparrowwallet.sparrow.EventManager;
@@ -17,6 +18,7 @@ import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.Hyperlink;
 import javafx.scene.control.Label;
+import javafx.scene.control.TreeTableColumn;
 import javafx.scene.control.TreeTableView;
 import javafx.scene.layout.StackPane;
 
@@ -28,6 +30,7 @@ import java.util.Optional;
 public class CoinTreeTable extends TreeTableView<Entry> {
     private BitcoinUnit bitcoinUnit;
     private UnitFormat unitFormat;
+    private CurrencyRate currencyRate;
 
     public BitcoinUnit getBitcoinUnit() {
         return bitcoinUnit;
@@ -64,6 +67,18 @@ public class CoinTreeTable extends TreeTableView<Entry> {
         }
     }
 
+    public CurrencyRate getCurrencyRate() {
+        return currencyRate;
+    }
+
+    public void setCurrencyRate(CurrencyRate currencyRate) {
+        this.currencyRate = currencyRate;
+
+        if(!getChildren().isEmpty()) {
+            refresh();
+        }
+    }
+
     public void updateHistoryStatus(WalletHistoryStatusEvent event) {
         if(getRoot() != null) {
             Entry entry = getRoot().getValue();
@@ -93,7 +108,7 @@ public class CoinTreeTable extends TreeTableView<Entry> {
             Hyperlink hyperlink = new Hyperlink();
             hyperlink.setTranslateY(30);
             hyperlink.setOnAction(event -> {
-                WalletBirthDateDialog dlg = new WalletBirthDateDialog(wallet.getBirthDate());
+                WalletBirthDateDialog dlg = new WalletBirthDateDialog(wallet.getBirthDate(), false);
                 Optional<Date> optDate = dlg.showAndWait();
                 if(optDate.isPresent()) {
                     Storage storage = AppServices.get().getOpenWallets().get(wallet);
@@ -118,5 +133,13 @@ public class CoinTreeTable extends TreeTableView<Entry> {
 
         stackPane.setAlignment(Pos.CENTER);
         return stackPane;
+    }
+
+    public void setSortColumn(int columnIndex, TreeTableColumn.SortType sortType) {
+        if(columnIndex >= 0 && columnIndex < getColumns().size() && getSortOrder().isEmpty() && !getRoot().getChildren().isEmpty()) {
+            TreeTableColumn<Entry, ?> column = getColumns().get(columnIndex);
+            column.setSortType(sortType == null ? TreeTableColumn.SortType.DESCENDING : sortType);
+            getSortOrder().add(column);
+        }
     }
 }

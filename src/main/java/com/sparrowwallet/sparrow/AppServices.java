@@ -50,7 +50,6 @@ import javafx.stage.Screen;
 import javafx.stage.Stage;
 import javafx.stage.Window;
 import javafx.util.Duration;
-import org.berndpruenster.netlayer.tor.Tor;
 import org.controlsfx.glyphfont.Glyph;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -62,8 +61,10 @@ import java.awt.event.KeyEvent;
 import java.io.File;
 import java.io.IOException;
 import java.net.*;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.List;
@@ -252,7 +253,7 @@ public class AppServices {
         }
 
         if(Tor.getDefault() != null) {
-            Tor.getDefault().shutdown();
+            Tor.getDefault().getTorManager().destroy(true, success -> {});
         }
     }
 
@@ -296,13 +297,13 @@ public class AppServices {
                     File crtFile = Config.get().getElectrumServerCert();
                     if(crtFile != null && Config.get().getServerType() == ServerType.ELECTRUM_SERVER) {
                         AppServices.showErrorDialog("SSL Handshake Failed", "The configured server certificate at " + crtFile.getAbsolutePath() + " did not match the certificate provided by the server at " + tlsServerException.getServer().getHost() + "." +
-                                "\n\nThis may indicate a man-in-the-middle attack!" +
+                                "\n\nThis may be simply due to a certificate renewal, or it may indicate a man-in-the-middle attack." +
                                 "\n\nChange the configured server certificate if you would like to proceed.");
                     } else {
                         crtFile = Storage.getCertificateFile(tlsServerException.getServer().getHost());
                         if(crtFile != null) {
                             Optional<ButtonType> optButton = AppServices.showErrorDialog("SSL Handshake Failed", "The certificate provided by the server at " + tlsServerException.getServer().getHost() + " appears to have changed." +
-                                    "\n\nThis may indicate a man-in-the-middle attack!" +
+                                    "\n\nThis may be simply due to a certificate renewal, or it may indicate a man-in-the-middle attack." +
                                     "\n\nDo you still want to proceed?", ButtonType.NO, ButtonType.YES);
                             if(optButton.isPresent() && optButton.get() == ButtonType.YES) {
                                 if(crtFile.delete()) {
@@ -326,7 +327,7 @@ public class AppServices {
                 }
             }
 
-            if(failEvent.getSource().getException() instanceof ProxyServerException && Config.get().isUseProxy() && Config.get().requiresTor()) {
+            if(failEvent.getSource().getException() instanceof ProxyServerException && Config.get().isUseProxy() && Config.get().isAutoSwitchProxy() && Config.get().requiresTor()) {
                 Config.get().setUseProxy(false);
                 Platform.runLater(() -> restartService(torService));
                 return;
@@ -414,23 +415,6 @@ public class AppServices {
             EventManager.get().post(new TorReadyStatusEvent());
         });
         torService.setOnFailed(workerStateEvent -> {
-            Throwable exception = workerStateEvent.getSource().getException();
-            if(exception instanceof TorServerAlreadyBoundException) {
-                String proxyServer = Config.get().getProxyServer();
-                if(proxyServer == null || proxyServer.equals("")) {
-                    proxyServer = "localhost:9050";
-                    Config.get().setProxyServer(proxyServer);
-                }
-
-                if(proxyServer.equals("localhost:9050") || proxyServer.equals("127.0.0.1:9050")) {
-                    Config.get().setUseProxy(true);
-                    torService.cancel();
-                    restartServices();
-                    EventManager.get().post(new TorExternalStatusEvent());
-                    return;
-                }
-            }
-
             EventManager.get().post(new TorFailedStatusEvent(workerStateEvent.getSource().getException()));
         });
 
@@ -490,8 +474,7 @@ public class AppServices {
             InetSocketAddress proxyAddress = new InetSocketAddress(proxyHostAndPort.getHost(), proxyHostAndPort.getPortOrDefault(ProxyTcpOverTlsTransport.DEFAULT_PROXY_PORT));
             proxy = new Proxy(Proxy.Type.SOCKS, proxyAddress);
         } else if(AppServices.isTorRunning()) {
-            InetSocketAddress proxyAddress = new InetSocketAddress("localhost", TorService.PROXY_PORT);
-            proxy = new Proxy(Proxy.Type.SOCKS, proxyAddress);
+            proxy = Tor.getDefault().getProxy();
         }
 
         //Setting new proxy authentication credentials will force a new Tor circuit to be created
@@ -546,7 +529,7 @@ public class AppServices {
 
     public static HostAndPort getTorProxy() {
         return AppServices.isTorRunning() ?
-                HostAndPort.fromParts("localhost", TorService.PROXY_PORT) :
+                Tor.getDefault().getProxyHostAndPort() :
                 (Config.get().getProxyServer() == null || Config.get().getProxyServer().isEmpty() || !Config.get().isUseProxy() ? null : HostAndPort.fromString(Config.get().getProxyServer()));
     }
 
@@ -688,6 +671,10 @@ public class AppServices {
     }
 
     private void addMempoolRateSizes(Set<MempoolRateSize> rateSizes) {
+        if(rateSizes.isEmpty()) {
+            return;
+        }
+
         LocalDateTime dateMinute = LocalDateTime.now().truncatedTo(ChronoUnit.MINUTES);
         if(mempoolHistogram.isEmpty()) {
             mempoolHistogram.put(Date.from(dateMinute.minusMinutes(1).atZone(ZoneId.systemDefault()).toInstant()), rateSizes);
@@ -697,6 +684,12 @@ public class AppServices {
 
         Date yesterday = Date.from(LocalDateTime.now().minusDays(1).atZone(ZoneId.systemDefault()).toInstant());
         mempoolHistogram.keySet().removeIf(date -> date.before(yesterday));
+
+        ZonedDateTime twoHoursAgo = LocalDateTime.now().minusHours(2).atZone(ZoneId.systemDefault());
+        mempoolHistogram.keySet().removeIf(date -> {
+            ZonedDateTime dateTime = date.toInstant().atZone(ZoneId.systemDefault());
+            return dateTime.isBefore(twoHoursAgo) && (dateTime.getMinute() % 10 != 0);
+        });
     }
 
     public static Double getMinimumRelayFeeRate() {
@@ -811,6 +804,24 @@ public class AppServices {
         }
     }
 
+    public static void openBlockExplorer(String txid) {
+        if(Config.get().isBlockExplorerDisabled()) {
+            return;
+        }
+
+        Server blockExplorer = Config.get().getBlockExplorer() == null ? BlockExplorer.MEMPOOL_SPACE.getServer() : Config.get().getBlockExplorer();
+        String url = blockExplorer.getUrl();
+        if(url.contains("{0}")) {
+            url = url.replace("{0}", txid);
+        } else {
+            if(Network.get() != Network.MAINNET) {
+                url += "/" + Network.get().getName();
+            }
+            url += "/tx/" + txid;
+        }
+        AppServices.get().getApplication().getHostServices().showDocument(url);
+    }
+
     static void parseFileUriArguments(List<String> fileUriArguments) {
         for(String fileUri : fileUriArguments) {
             try {
@@ -898,7 +909,7 @@ public class AppServices {
 
             if(wallet != null) {
                 final Wallet sendingWallet = wallet;
-                EventManager.get().post(new SendActionEvent(sendingWallet, new ArrayList<>(sendingWallet.getWalletUtxos().keySet()), true));
+                EventManager.get().post(new SendActionEvent(sendingWallet, new ArrayList<>(sendingWallet.getSpendableUtxos().keySet()), true));
                 Platform.runLater(() -> EventManager.get().post(new SendPaymentsEvent(sendingWallet, List.of(bitcoinURI.toPayment()))));
             }
         } catch(Exception e) {
@@ -1023,8 +1034,6 @@ public class AppServices {
     public void newConnection(ConnectionEvent event) {
         currentBlockHeight = event.getBlockHeight();
         System.setProperty(Network.BLOCK_HEIGHT_PROPERTY, Integer.toString(currentBlockHeight));
-        targetBlockFeeRates = event.getTargetBlockFeeRates();
-        addMempoolRateSizes(event.getMempoolRateSizes());
         minimumRelayFeeRate = Math.max(event.getMinimumRelayFeeRate(), Transaction.DEFAULT_MIN_RELAY_FEE);
         latestBlockHeader = event.getBlockHeader();
         Config.get().addRecentServer();
@@ -1047,6 +1056,10 @@ public class AppServices {
     @Subscribe
     public void feesUpdated(FeeRatesUpdatedEvent event) {
         targetBlockFeeRates = event.getTargetBlockFeeRates();
+    }
+
+    @Subscribe
+    public void mempoolRateSizes(MempoolRateSizesUpdatedEvent event) {
         addMempoolRateSizes(event.getMempoolRateSizes());
     }
 
@@ -1112,7 +1125,7 @@ public class AppServices {
             Wallet wallet = walletTabData.getWallet();
             Storage storage = walletTabData.getStorage();
 
-            if(Interface.get() == Interface.DESKTOP && (!storage.getWalletFile().exists() || wallet.containsSource(KeystoreSource.HW_USB))) {
+            if(Interface.get() == Interface.DESKTOP && (!storage.getWalletFile().exists() || wallet.containsSource(KeystoreSource.HW_USB) || CardApi.isReaderAvailable())) {
                 usbWallet = true;
 
                 if(deviceEnumerateService == null) {

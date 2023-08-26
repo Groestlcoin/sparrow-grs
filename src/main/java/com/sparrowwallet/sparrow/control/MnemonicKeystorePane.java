@@ -12,6 +12,8 @@ import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ListChangeListener;
 import javafx.collections.ObservableList;
+import javafx.concurrent.ScheduledService;
+import javafx.concurrent.Task;
 import javafx.geometry.Insets;
 import javafx.geometry.Orientation;
 import javafx.geometry.Pos;
@@ -20,8 +22,8 @@ import javafx.scene.control.*;
 import javafx.scene.input.Clipboard;
 import javafx.scene.layout.*;
 import javafx.util.Callback;
+import javafx.util.Duration;
 import org.controlsfx.control.textfield.AutoCompletionBinding;
-import org.controlsfx.control.textfield.CustomTextField;
 import org.controlsfx.control.textfield.TextFields;
 import org.controlsfx.glyphfont.Glyph;
 import org.controlsfx.validation.ValidationResult;
@@ -44,7 +46,7 @@ public class MnemonicKeystorePane extends TitledDescriptionPane {
     protected Label invalidLabel;
 
     protected SimpleListProperty<String> wordEntriesProperty;
-    protected final SimpleStringProperty passphraseProperty = new SimpleStringProperty();
+    protected final SimpleStringProperty passphraseProperty = new SimpleStringProperty("");
     protected IntegerProperty defaultWordSizeProperty;
 
     public MnemonicKeystorePane(String title, String description, String content, String imageUrl) {
@@ -79,12 +81,55 @@ public class MnemonicKeystorePane extends TitledDescriptionPane {
             enterMnemonicButton.getItems().add(item);
         }
         enterMnemonicButton.getItems().add(new SeparatorMenuItem());
+        MenuItem gridItem = new MenuItem("Border Wallets Grid...");
+        gridItem.setOnAction(event -> {
+            showGrid();
+        });
+        enterMnemonicButton.getItems().add(gridItem);
+
         MenuItem scanItem = new MenuItem("Scan QR...");
         scanItem.setOnAction(event -> {
             scanQR();
         });
         enterMnemonicButton.getItems().add(scanItem);
         enterMnemonicButton.managedProperty().bind(enterMnemonicButton.visibleProperty());
+    }
+
+    protected void showGrid() {
+        MnemonicGridDialog mnemonicGridDialog = new MnemonicGridDialog();
+        Optional<List<String>> optWords = mnemonicGridDialog.showAndWait();
+        if(optWords.isPresent()) {
+            List<String> words = optWords.get();
+            defaultWordSizeProperty.set(words.size() + 1);
+            setContent(getMnemonicWordsEntry(words.size() + 1, true, true));
+            setExpanded(true);
+
+            for(int i = 0; i < wordsPane.getChildren().size(); i++) {
+                WordEntry wordEntry = (WordEntry)wordsPane.getChildren().get(i);
+                if(i < words.size()) {
+                    wordEntry.getEditor().setText(words.get(i));
+                    wordEntry.getEditor().setEditable(false);
+                } else {
+                    ScheduledService<Void> service = new ScheduledService<>() {
+                        @Override
+                        protected Task<Void> createTask() {
+                            return new Task<>() {
+                                @Override
+                                protected Void call() {
+                                    return null;
+                                }
+                            };
+                        }
+                    };
+                    service.setDelay(Duration.millis(500));
+                    service.setOnSucceeded(event1 -> {
+                        service.cancel();
+                        Platform.runLater(() -> wordEntry.getEditor().requestFocus());
+                    });
+                    service.start();
+                }
+            }
+        }
     }
 
     protected void scanQR() {
@@ -106,7 +151,7 @@ public class MnemonicKeystorePane extends TitledDescriptionPane {
 
     protected void showWordList(DeterministicSeed seed) {
         List<String> words = seed.getMnemonicCode();
-        setContent(getMnemonicWordsEntry(words.size()));
+        setContent(getMnemonicWordsEntry(words.size(), true, true));
         setExpanded(true);
 
         for(int i = 0; i < wordsPane.getChildren().size(); i++) {
@@ -119,11 +164,11 @@ public class MnemonicKeystorePane extends TitledDescriptionPane {
     protected void enterMnemonic(int numWords) {
         setDescription("Generate new or enter existing");
         showHideLink.setVisible(false);
-        setContent(getMnemonicWordsEntry(numWords));
+        setContent(getMnemonicWordsEntry(numWords, true, true));
         setExpanded(true);
     }
 
-    protected Node getMnemonicWordsEntry(int numWords) {
+    protected Node getMnemonicWordsEntry(int numWords, boolean showPassphrase, boolean editPassphrase) {
         VBox vBox = new VBox();
         vBox.setSpacing(10);
 
@@ -152,10 +197,12 @@ public class MnemonicKeystorePane extends TitledDescriptionPane {
 
         vBox.getChildren().add(wordsPane);
 
-        PassphraseEntry passphraseEntry = new PassphraseEntry();
-        wordEntries.get(wordEntries.size() - 1).setNextField(passphraseEntry.getEditor());
-        passphraseEntry.setPadding(new Insets(0, 26, 10, 10));
-        vBox.getChildren().add(passphraseEntry);
+        if(showPassphrase) {
+            PassphraseEntry passphraseEntry = new PassphraseEntry(editPassphrase);
+            wordEntries.get(wordEntries.size() - 1).setNextField(passphraseEntry.getEditor());
+            passphraseEntry.setPadding(new Insets(0, 26, 10, 10));
+            vBox.getChildren().add(passphraseEntry);
+        }
 
         AnchorPane buttonPane = new AnchorPane();
         buttonPane.setPadding(new Insets(0, 26, 0, 10));
@@ -250,9 +297,14 @@ public class MnemonicKeystorePane extends TitledDescriptionPane {
                     if(clipboard.hasString() && clipboard.getString().matches("(?m).+[\\n\\s][\\S\\s]*")) {
                         String[] words = clipboard.getString().split("[\\n\\s]");
                         WordEntry entry = WordEntry.this;
-                        for(String word : words) {
+                        for(int i = 0; i < words.length; i++) {
+                            String word = words[i];
                             if(entry.nextField != null) {
-                                entry.nextField.requestFocus();
+                                if(i == words.length - 2 && isValid(word)) {
+                                    label.requestFocus();
+                                } else {
+                                    entry.nextField.requestFocus();
+                                }
                             }
 
                             entry.wordField.setText(word);
@@ -282,7 +334,7 @@ public class MnemonicKeystorePane extends TitledDescriptionPane {
             wordField.setTextFormatter(formatter);
 
             wordList = Bip39MnemonicCode.INSTANCE.getWordList();
-            AutoCompletionBinding<String> autoCompletionBinding = TextFields.bindAutoCompletion(wordField, new WordlistSuggestionProvider(wordList));
+            AutoCompletionBinding<String> autoCompletionBinding = TextFields.bindAutoCompletion(wordField, new WordlistSuggestionProvider(wordList, wordNumber, wordEntryList));
             autoCompletionBinding.setDelay(50);
             autoCompletionBinding.setOnAutoCompleted(event -> {
                 if(nextField != null) {
@@ -290,11 +342,20 @@ public class MnemonicKeystorePane extends TitledDescriptionPane {
                 }
             });
 
+            //Show autocomplete for the last word on focus if empty
+            boolean lastWord = wordNumber == wordEntryList.size() - 1;
+            if(lastWord) {
+                wordField.focusedProperty().addListener((observable, oldValue, focused) -> {
+                    if(focused && wordField.getText().isEmpty()) {
+                        autoCompletionBinding.setUserInput("");
+                    }
+                });
+            }
+
             ValidationSupport validationSupport = new ValidationSupport();
             validationSupport.setValidationDecorator(new StyleClassValidationDecoration());
             validationSupport.registerValidator(wordField, Validator.combine(
-                    Validator.createEmptyValidator("Word is required"),
-                    (Control c, String newValue) -> ValidationResult.fromErrorIf( c, "Invalid word", !wordList.contains(newValue))
+                    (Control c, String newValue) -> ValidationResult.fromErrorIf( c, "Invalid word", (newValue.length() > 0 || !lastWord) && !wordList.contains(newValue))
             ));
 
             wordField.textProperty().addListener((observable, oldValue, newValue) -> {
@@ -323,13 +384,30 @@ public class MnemonicKeystorePane extends TitledDescriptionPane {
 
     protected static class WordlistSuggestionProvider implements Callback<AutoCompletionBinding.ISuggestionRequest, Collection<String>> {
         private final List<String> wordList;
+        private final int wordNumber;
+        private final ObservableList<String> wordEntryList;
 
-        public WordlistSuggestionProvider(List<String> wordList) {
+        public WordlistSuggestionProvider(List<String> wordList, int wordNumber, ObservableList<String> wordEntryList) {
             this.wordList = wordList;
+            this.wordNumber = wordNumber;
+            this.wordEntryList = wordEntryList;
         }
 
         @Override
         public Collection<String> call(AutoCompletionBinding.ISuggestionRequest request) {
+            if(wordNumber == wordEntryList.size() - 1 && allPreviousWordsValid()) {
+                try {
+                    List<String> possibleLastWords = Bip39MnemonicCode.INSTANCE.getPossibleLastWords(wordEntryList.subList(0, wordEntryList.size() - 1));
+                    if(!request.getUserText().isEmpty()) {
+                        possibleLastWords.removeIf(s -> !s.startsWith(request.getUserText()));
+                    }
+
+                    return possibleLastWords;
+                } catch(Exception e) {
+                    log.warn("Cannot determine possible last words", e);
+                }
+            }
+
             List<String> suggestions = new ArrayList<>();
             if(!request.getUserText().isEmpty()) {
                 for(String word : wordList) {
@@ -341,26 +419,63 @@ public class MnemonicKeystorePane extends TitledDescriptionPane {
 
             return suggestions;
         }
+
+        private boolean allPreviousWordsValid() {
+            for(int i = 0; i < wordEntryList.size() - 1; i++) {
+                if(!WordEntry.isValid(wordEntryList.get(i))) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
     }
 
     protected class PassphraseEntry extends HBox {
-        private final CustomTextField passphraseField;
+        private final TextField passphraseField;
 
-        public PassphraseEntry() {
+        public PassphraseEntry(boolean editable) {
             super();
 
             setAlignment(Pos.CENTER_LEFT);
             setSpacing(10);
+            Label usePassphraseLabel = new Label("Use passphrase?");
+            usePassphraseLabel.managedProperty().bind(usePassphraseLabel.visibleProperty());
+            CheckBox usePassphraseCheckbox = new CheckBox(" ");
+            usePassphraseCheckbox.setDisable(!editable);
+            usePassphraseCheckbox.managedProperty().bind(usePassphraseCheckbox.visibleProperty());
+            usePassphraseLabel.visibleProperty().bind(usePassphraseCheckbox.visibleProperty());
+            usePassphraseCheckbox.setVisible(passphraseProperty.isEmpty().get());
+            usePassphraseCheckbox.selectedProperty().addListener((observable, oldValue, newValue) -> {
+                if(newValue) {
+                    Optional<ButtonType> optType = AppServices.showWarningDialog("Add a passphrase?", "A passphrase is not a password! " +
+                            "Any variation entered in future loads a valid wallet, but with different addresses.\n\n" +
+                            "This feature provides optional added security for advanced users only. Are you sure?", ButtonType.NO, ButtonType.YES);
+                    if(optType.isPresent() && optType.get() == ButtonType.YES) {
+                        usePassphraseCheckbox.setVisible(false);
+                    } else {
+                        usePassphraseCheckbox.setSelected(false);
+                    }
+                }
+            });
+
             Label passphraseLabel = new Label("Passphrase:");
-            passphraseField = (CustomTextField) TextFields.createClearableTextField();
+            passphraseLabel.managedProperty().bind(passphraseLabel.visibleProperty());
+            passphraseField = new TextField();
+            passphraseField.setPromptText(passphraseProperty.isEmpty().get() ? "Leave blank for none" : "");
+            passphraseField.setText(passphraseProperty.get());
+            passphraseField.setDisable(!editable);
+            passphraseField.managedProperty().bind(passphraseField.visibleProperty());
+            passphraseLabel.visibleProperty().bind(passphraseField.visibleProperty());
+            passphraseField.visibleProperty().bind(usePassphraseCheckbox.visibleProperty().not());
             passphraseProperty.bind(passphraseField.textProperty());
-            passphraseField.setPromptText("Leave blank for none");
 
             HelpLabel helpLabel = new HelpLabel();
+            helpLabel.setPrefHeight(28);
             helpLabel.setStyle("-fx-padding: 0 0 0 0");
-            helpLabel.setHelpText("A passphrase provides optional added security - it is not stored so it must be remembered!");
+            helpLabel.setHelpText("Advanced feature: a passphrase provides optional added security, but it is not stored so it must be remembered!");
 
-            getChildren().addAll(passphraseLabel, passphraseField, helpLabel);
+            getChildren().addAll(usePassphraseLabel, usePassphraseCheckbox, passphraseLabel, passphraseField, helpLabel);
         }
 
         public TextField getEditor() {

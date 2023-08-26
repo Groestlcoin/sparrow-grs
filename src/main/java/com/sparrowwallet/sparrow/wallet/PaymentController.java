@@ -21,6 +21,7 @@ import com.sparrowwallet.sparrow.EventManager;
 import com.sparrowwallet.sparrow.control.*;
 import com.sparrowwallet.sparrow.event.*;
 import com.sparrowwallet.sparrow.glyphfont.FontAwesome5;
+import com.sparrowwallet.sparrow.io.CardApi;
 import com.sparrowwallet.sparrow.io.Config;
 import com.sparrowwallet.sparrow.io.Storage;
 import com.sparrowwallet.sparrow.net.ExchangeSource;
@@ -142,6 +143,13 @@ public class PaymentController extends WalletFormController implements Initializ
         }
     };
 
+    private static final Wallet nfcCardWallet = new Wallet() {
+        @Override
+        public String getFullDisplayName() {
+            return "NFC Card...";
+        }
+    };
+
     @Override
     public void initialize(URL location, ResourceBundle resources) {
         EventManager.get().register(this);
@@ -162,6 +170,13 @@ public class PaymentController extends WalletFormController implements Initializ
                 PayNymDialog payNymDialog = new PayNymDialog(sendController.getWalletForm().getWalletId(), PayNymDialog.Operation.SEND, selectLinkedOnly);
                 Optional<PayNym> optPayNym = payNymDialog.showAndWait();
                 optPayNym.ifPresent(this::setPayNym);
+            } else if(newValue == nfcCardWallet) {
+                DeviceGetAddressDialog deviceGetAddressDialog = new DeviceGetAddressDialog(Collections.emptyList());
+                Optional<Address> optAddress = deviceGetAddressDialog.showAndWait();
+                if(optAddress.isPresent()) {
+                    address.setText(optAddress.get().toString());
+                    label.requestFocus();
+                }
             } else if(newValue != null) {
                 WalletNode freshNode = newValue.getFreshNode(KeyPurpose.RECEIVE);
                 Address freshAddress = freshNode.getAddress();
@@ -182,11 +197,30 @@ public class PaymentController extends WalletFormController implements Initializ
                 }
             }
         });
+        openWallets.setOnShowing(event -> {
+            if(!openWallets.getItems().contains(nfcCardWallet) && CardApi.isReaderAvailable()) {
+                openWallets.getItems().add(nfcCardWallet);
+            } else if(openWallets.getItems().contains(nfcCardWallet) && !CardApi.isReaderAvailable()) {
+                openWallets.getItems().remove(nfcCardWallet);
+            }
+        });
 
         payNymProperty.addListener((observable, oldValue, payNym) -> {
             updateMixOnlyStatus(payNym);
             revalidateAmount();
         });
+
+        address.setTextFormatter(new TextFormatter<>(change -> {
+            String controlNewText = change.getControlNewText();
+            if(!controlNewText.equals(controlNewText.trim())) {
+                String text = change.getText();
+                String newText = text.trim();
+                int caretPos = change.getCaretPosition() - text.length() + newText.length();
+                change.setText(newText);
+                change.selectRange(caretPos, caretPos);
+            }
+            return change;
+        }));
 
         address.textProperty().addListener((observable, oldValue, newValue) -> {
             address.leftProperty().set(null);
@@ -324,12 +358,20 @@ public class PaymentController extends WalletFormController implements Initializ
             openWalletList.add(payNymWallet);
         }
 
+        if(CardApi.isReaderAvailable()) {
+            openWalletList.add(nfcCardWallet);
+        }
+
         openWallets.setItems(FXCollections.observableList(openWalletList));
     }
 
     private Node getOpenWalletIcon(Wallet wallet) {
         if(wallet == payNymWallet) {
             return getPayNymGlyph();
+        }
+
+        if(wallet == nfcCardWallet) {
+            return getNfcCardGlyph();
         }
 
         Wallet masterWallet = wallet.isMasterWallet() ? wallet : wallet.getMasterWallet();
@@ -383,7 +425,11 @@ public class PaymentController extends WalletFormController implements Initializ
             try {
                 Wallet recipientBip47Wallet = getWalletForPayNym(payNym);
                 if(recipientBip47Wallet != null) {
+                    int index = sendController.getPayNymSendIndex(this);
                     WalletNode sendNode = recipientBip47Wallet.getFreshNode(KeyPurpose.SEND);
+                    for(int i = 0; i < index; i++) {
+                        sendNode = recipientBip47Wallet.getFreshNode(KeyPurpose.SEND, sendNode);
+                    }
                     ECKey pubKey = sendNode.getPubKey();
                     Address address = recipientBip47Wallet.getScriptType().getAddress(pubKey);
                     if(sendController.getPaymentTabs().getTabs().size() > 1 || (getRecipientValueSats() != null && getRecipientValueSats() > getRecipientDustThreshold(address)) || maxButton.isSelected()) {
@@ -401,6 +447,11 @@ public class PaymentController extends WalletFormController implements Initializ
     private Wallet getWalletForPayNym(PayNym payNym) throws InvalidPaymentCodeException {
         Wallet masterWallet = sendController.getWalletForm().getMasterWallet();
         return masterWallet.getChildWallet(new PaymentCode(payNym.paymentCode().toString()), payNym.segwit() ? ScriptType.P2WPKH : ScriptType.P2PKH);
+    }
+
+    boolean isSentToSamePayNym(PaymentController paymentController) {
+        return (this != paymentController && payNymProperty.get() != null && !payNymProperty.get().isCollaborativeSend()
+                && payNymProperty.get().paymentCode().equals(paymentController.payNymProperty.get().paymentCode()));
     }
 
     private Long getRecipientValueSats() {
@@ -639,6 +690,13 @@ public class PaymentController extends WalletFormController implements Initializ
         return payNymGlyph;
     }
 
+    public static Glyph getNfcCardGlyph() {
+        Glyph nfcCardGlyph = new Glyph(FontAwesome5.FONT_NAME, FontAwesome5.Glyph.WIFI);
+        nfcCardGlyph.getStyleClass().add("nfccard-icon");
+        nfcCardGlyph.setFontSize(12);
+        return nfcCardGlyph;
+    }
+
     @Subscribe
     public void bitcoinUnitChanged(BitcoinUnitChangedEvent event) {
         BitcoinUnit unit = sendController.getBitcoinUnit(event.getBitcoinUnit());
@@ -648,7 +706,7 @@ public class PaymentController extends WalletFormController implements Initializ
     @Subscribe
     public void unitFormatChanged(UnitFormatChangedEvent event) {
         if(amount.getTextFormatter() instanceof CoinTextFormatter coinTextFormatter && coinTextFormatter.getUnitFormat() != event.getUnitFormat()) {
-            Long value = getRecipientValueSats(coinTextFormatter.getUnitFormat(), event.getBitcoinUnit());
+            Long value = getRecipientValueSats(coinTextFormatter.getUnitFormat(), amountUnit.getSelectionModel().getSelectedItem());
             amount.setTextFormatter(new CoinTextFormatter(event.getUnitFormat()));
 
             if(value != null) {

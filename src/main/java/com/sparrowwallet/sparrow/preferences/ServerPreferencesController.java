@@ -28,8 +28,6 @@ import javafx.stage.DirectoryChooser;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 import javafx.util.Duration;
-import javafx.util.StringConverter;
-import org.berndpruenster.netlayer.tor.Tor;
 import org.controlsfx.control.SegmentedButton;
 import org.controlsfx.glyphfont.Glyph;
 import org.controlsfx.validation.ValidationResult;
@@ -243,6 +241,7 @@ public class ServerPreferencesController extends PreferencesDetailController {
         proxyHost.textProperty().addListener(getProxyListener(config));
         proxyPort.textProperty().addListener(getProxyListener(config));
 
+        corePort.setPromptText("e.g. " + Network.get().getDefaultPort());
         coreDataDirField.managedProperty().bind(coreDataDirField.visibleProperty());
         coreUserPassField.managedProperty().bind(coreUserPassField.visibleProperty());
         coreUserPassField.visibleProperty().bind(coreDataDirField.visibleProperty().not());
@@ -329,6 +328,7 @@ public class ServerPreferencesController extends PreferencesDetailController {
             setElectrumServerInConfig(config);
             electrumCertificate.setDisable(!newValue);
             electrumCertificateSelect.setDisable(!newValue);
+            electrumPort.setPromptText(newValue ? "e.g. 50002" : "e.g. 50001");
         });
 
         electrumCertificate.textProperty().addListener((observable, oldValue, newValue) -> {
@@ -492,20 +492,6 @@ public class ServerPreferencesController extends PreferencesDetailController {
             torService.cancel();
             testResults.appendText("\nTor failed to start");
             showConnectionFailure(workerStateEvent.getSource().getException());
-
-            Throwable exception = workerStateEvent.getSource().getException();
-            if(Config.get().getServerType() == ServerType.ELECTRUM_SERVER &&
-                    exception instanceof TorServerAlreadyBoundException &&
-                    useProxyOriginal == null && !useProxy.isSelected() &&
-                    (proxyHost.getText().isEmpty() || proxyHost.getText().equals("localhost") || proxyHost.getText().equals("127.0.0.1")) &&
-                    (proxyPort.getText().isEmpty() || proxyPort.getText().equals("9050"))) {
-                useProxy.setSelected(true);
-                proxyHost.setText("localhost");
-                proxyPort.setText("9050");
-                useProxyOriginal = false;
-                testResults.appendText("\n\nAssuming Tor proxy is running on port 9050 and trying again...");
-                startElectrumConnection();
-            }
         });
 
         torService.start();
@@ -656,10 +642,12 @@ public class ServerPreferencesController extends PreferencesDetailController {
             reason = tlsServerException.getMessage() + "\n\n" + reason;
         } else if(exception instanceof ProxyServerException) {
             reason += ". Check if the proxy server is running.";
-        } else if(exception instanceof TorServerAlreadyBoundException) {
-            reason += "\nIs a Tor proxy already running on port " + TorService.PROXY_PORT + "?";
         } else if(reason != null && (reason.contains("Check if Groestlcoin Core is running") || reason.contains("Could not connect to Groestlcoin Core RPC"))) {
             reason += "\n\nSee https://sparrowwallet.com/docs/connect-node.html";
+        } else if(reason != null && (reason.startsWith("Cannot connect to hidden service"))) {
+            reason += " on the server. Check that the onion address and port are correct, and that both Tor and the Electrum server are running on the node. Usually SSL is not enabled, and the port is 50001.";
+        } else if(reason != null && (reason.startsWith("Cannot find Groestlcoin Core cookie file at"))) {
+            reason += "\n\nMake sure server=1 has been added to bitcoin.conf";
         }
 
         testResults.setText("Could not connect:\n\n" + reason);
@@ -731,6 +719,10 @@ public class ServerPreferencesController extends PreferencesDetailController {
     private ChangeListener<String> getBitcoinCoreListener(Config config) {
         return (observable, oldValue, newValue) -> {
             Server existingServer = config.getRecentCoreServers().stream().filter(server -> coreHost.getText().equals(server.getAlias())).findFirst().orElse(null);
+            if(existingServer != null && !existingServer.portEquals(corePort.getText())) {
+                coreHost.setText(existingServer.getHost());
+                existingServer = null;
+            }
             coreHost.setLeft(existingServer == null ? null : getGlyph(FontAwesome5.Glyph.TAG, null));
             setCoreServerInConfig(config);
         };
@@ -745,11 +737,13 @@ public class ServerPreferencesController extends PreferencesDetailController {
 
         String hostAsString = getHost(coreHost.getText());
         Integer portAsInteger = getPort(corePort.getText());
-        if(hostAsString != null && portAsInteger != null && isValidPort(portAsInteger)) {
+        if(hostAsString != null && !hostAsString.isEmpty() && portAsInteger != null && isValidPort(portAsInteger)) {
             Protocol protocol = portAsInteger == Protocol.HTTPS.getDefaultPort() ? Protocol.HTTPS : Protocol.HTTP;
             config.setCoreServer(new Server(protocol.toUrlString(hostAsString, portAsInteger)));
-        } else if(hostAsString != null) {
+        } else if(hostAsString != null && !hostAsString.isEmpty()) {
             config.setCoreServer(new Server(Protocol.HTTP.toUrlString(hostAsString)));
+        } else {
+            config.setCoreServer(null);
         }
     }
 
@@ -764,6 +758,10 @@ public class ServerPreferencesController extends PreferencesDetailController {
     private ChangeListener<String> getElectrumServerListener(Config config) {
         return (observable, oldValue, newValue) -> {
             Server existingServer = config.getRecentElectrumServers().stream().filter(server -> electrumHost.getText().equals(server.getAlias())).findFirst().orElse(null);
+            if(existingServer != null && !existingServer.portEquals(electrumPort.getText())) {
+                electrumHost.setText(existingServer.getHost());
+                existingServer = null;
+            }
             electrumHost.setLeft(existingServer == null ? null : getGlyph(FontAwesome5.Glyph.TAG, null));
             setElectrumServerInConfig(config);
         };
@@ -778,10 +776,12 @@ public class ServerPreferencesController extends PreferencesDetailController {
 
         String hostAsString = getHost(electrumHost.getText());
         Integer portAsInteger = getPort(electrumPort.getText());
-        if(hostAsString != null && portAsInteger != null && isValidPort(portAsInteger)) {
+        if(hostAsString != null && !hostAsString.isEmpty() && portAsInteger != null && isValidPort(portAsInteger)) {
             config.setElectrumServer(new Server(getProtocol().toUrlString(hostAsString, portAsInteger)));
-        } else if(hostAsString != null) {
+        } else if(hostAsString != null && !hostAsString.isEmpty()) {
             config.setElectrumServer(new Server(getProtocol().toUrlString(hostAsString)));
+        } else {
+            config.setElectrumServer(null);
         }
     }
 

@@ -1,8 +1,10 @@
 package com.sparrowwallet.sparrow.net.cormorant.bitcoind;
 
 import com.github.arteam.simplejsonrpc.client.Transport;
+import com.sparrowwallet.drongo.Network;
 import com.sparrowwallet.sparrow.AppServices;
 import com.sparrowwallet.sparrow.io.Server;
+import com.sparrowwallet.sparrow.net.Protocol;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -14,6 +16,7 @@ import java.net.Proxy;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
 import java.util.Base64;
@@ -22,6 +25,7 @@ public class BitcoindTransport implements Transport {
     private static final Logger log = LoggerFactory.getLogger(BitcoindTransport.class);
     public static final String COOKIE_FILENAME = ".cookie";
 
+    private final Server bitcoindServer;
     private URL bitcoindUrl;
     private File cookieFile;
     private Long cookieFileTimestamp;
@@ -34,12 +38,17 @@ public class BitcoindTransport implements Transport {
 
     public BitcoindTransport(Server bitcoindServer, String bitcoindWallet, File bitcoindDir) {
         this(bitcoindServer, bitcoindWallet);
-        this.cookieFile = new File(bitcoindDir, COOKIE_FILENAME);
+        this.cookieFile = new File(getCookieDir(bitcoindDir), COOKIE_FILENAME);
     }
 
     private BitcoindTransport(Server bitcoindServer, String bitcoindWallet) {
+        this.bitcoindServer = bitcoindServer;
         try {
-            this.bitcoindUrl = new URL(bitcoindServer.getUrl() + "/wallet/" + bitcoindWallet);
+            String serverUrl = bitcoindServer.getUrl();
+            if(!bitcoindServer.getHostAndPort().hasPort()) {
+                serverUrl += ":" + Network.get().getDefaultPort();
+            }
+            this.bitcoindUrl = new URL(serverUrl + "/wallet/" + bitcoindWallet);
         } catch(MalformedURLException e) {
             log.error("Malformed Groestlcoin Core RPC URL", e);
         }
@@ -48,7 +57,7 @@ public class BitcoindTransport implements Transport {
     @Override
     public String pass(String request) throws IOException {
         Proxy proxy = AppServices.getProxy();
-        HttpURLConnection connection = proxy == null ? (HttpURLConnection)bitcoindUrl.openConnection() : (HttpURLConnection)bitcoindUrl.openConnection(proxy);
+        HttpURLConnection connection = proxy != null && Protocol.isOnionAddress(bitcoindServer) ? (HttpURLConnection)bitcoindUrl.openConnection(proxy) : (HttpURLConnection)bitcoindUrl.openConnection();
 
         if(connection instanceof HttpsURLConnection httpsURLConnection) {
             SSLSocketFactory sslSocketFactory = getTrustAllSocketFactory();
@@ -67,7 +76,7 @@ public class BitcoindTransport implements Transport {
 
         connection.setDoOutput(true);
 
-        log.trace("> " + request);
+        log.debug("> " + request);
 
         try(OutputStream os = connection.getOutputStream()) {
             byte[] jsonBytes = request.getBytes(StandardCharsets.UTF_8);
@@ -93,7 +102,7 @@ public class BitcoindTransport implements Transport {
         }
 
         String response = res.toString();
-        log.trace("< " + response);
+        log.debug("< " + response);
 
         return response;
     }
@@ -116,6 +125,18 @@ public class BitcoindTransport implements Transport {
         }
 
         return bitcoindAuthEncoded;
+    }
+
+    private static File getCookieDir(File bitcoindDir) {
+        if(Network.get() == Network.TESTNET && Files.exists(Path.of(bitcoindDir.getAbsolutePath(), "testnet3", COOKIE_FILENAME))) {
+            return new File(bitcoindDir, "testnet3");
+        } else if(Network.get() == Network.REGTEST && Files.exists(Path.of(bitcoindDir.getAbsolutePath(), "regtest", COOKIE_FILENAME))) {
+            return new File(bitcoindDir, "regtest");
+        } else if(Network.get() == Network.SIGNET && Files.exists(Path.of(bitcoindDir.getAbsolutePath(), "signet", COOKIE_FILENAME))) {
+            return new File(bitcoindDir, "signet");
+        }
+
+        return bitcoindDir;
     }
 
     private SSLSocketFactory getTrustAllSocketFactory() {

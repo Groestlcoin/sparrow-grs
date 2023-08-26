@@ -1,14 +1,19 @@
 package com.sparrowwallet.sparrow.net.cormorant.bitcoind;
 
+import com.github.arteam.simplejsonrpc.client.JsonRpcParams;
+import com.github.arteam.simplejsonrpc.client.ParamsType;
 import com.github.arteam.simplejsonrpc.core.annotation.JsonRpcMethod;
 import com.github.arteam.simplejsonrpc.core.annotation.JsonRpcOptional;
 import com.github.arteam.simplejsonrpc.core.annotation.JsonRpcParam;
 import com.github.arteam.simplejsonrpc.core.annotation.JsonRpcService;
+import com.sparrowwallet.drongo.protocol.Sha256Hash;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @JsonRpcService
+@JsonRpcParams(ParamsType.ARRAY)
 public interface BitcoindClientService {
     @JsonRpcMethod("uptime")
     long uptime();
@@ -20,7 +25,10 @@ public interface BitcoindClientService {
     FeeInfo estimateSmartFee(@JsonRpcParam("conf_target") int blocks);
 
     @JsonRpcMethod("getrawmempool")
-    Map<String, MempoolEntry> getRawMempool(@JsonRpcParam("verbose") boolean verbose);
+    Set<Sha256Hash> getRawMempool();
+
+    @JsonRpcMethod("getrawmempool")
+    Map<Sha256Hash, MempoolEntry> getRawMempool(@JsonRpcParam("verbose") boolean verbose);
 
     @JsonRpcMethod("getmempoolinfo")
     MempoolInfo getMempoolInfo();
@@ -43,6 +51,9 @@ public interface BitcoindClientService {
     @JsonRpcMethod("getrawtransaction")
     Object getRawTransaction(@JsonRpcParam("txid") String txid, @JsonRpcParam("verbose") boolean verbose);
 
+    @JsonRpcMethod("gettransaction")
+    Map<String, Object> getTransaction(@JsonRpcParam("txid") String txid, @JsonRpcParam("include_watchonly") boolean includeWatchOnly, @JsonRpcParam("verbose") boolean verbose);
+
     @JsonRpcMethod("getmempoolentry")
     MempoolEntry getMempoolEntry(@JsonRpcParam("txid") String txid);
 
@@ -53,6 +64,9 @@ public interface BitcoindClientService {
 
     @JsonRpcMethod("listwalletdir")
     ListWalletDirResult listWalletDir();
+
+    @JsonRpcMethod("listwallets")
+    List<String> listWallets();
 
     @JsonRpcMethod("createwallet")
     CreateLoadWalletResult createWallet(@JsonRpcParam("wallet_name") String name, @JsonRpcParam("disable_private_keys") boolean disablePrivateKeys, @JsonRpcParam("blank") boolean blank,

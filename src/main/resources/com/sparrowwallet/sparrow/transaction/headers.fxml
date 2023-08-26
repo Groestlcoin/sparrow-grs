@@ -45,11 +45,26 @@
         <Fieldset text="Transaction" inputGrow="SOMETIMES" wrapWidth="620">
             <Field text="Txid:" styleClass="label-button">
                 <IdLabel fx:id="id"/>
-                <Button maxWidth="25" minWidth="-Infinity" prefWidth="30" text="Cy" onAction="#copyId">
-                    <graphic>
-                        <Glyph fontFamily="FontAwesome" icon="COPY" prefWidth="15" />
-                    </graphic>
-                </Button>
+                <SegmentedButton>
+                    <buttons>
+                        <ToggleButton fx:id="copyTxid" onAction="#copyId">
+                            <graphic>
+                                <Glyph fontFamily="Font Awesome 5 Free Solid" fontSize="12" icon="COPY" />
+                            </graphic>
+                            <tooltip>
+                                <Tooltip text="Copy the transaction id to the clipboard"/>
+                            </tooltip>
+                        </ToggleButton>
+                        <ToggleButton fx:id="openBlockExplorer" onAction="#openInBlockExplorer">
+                            <graphic>
+                                <Glyph fontFamily="Font Awesome 5 Free Solid" fontSize="12" icon="UP_RIGHT_FROM_SQUARE" />
+                            </graphic>
+                            <tooltip>
+                                <Tooltip text="Open transaction in the configured block explorer"/>
+                            </tooltip>
+                        </ToggleButton>
+                    </buttons>
+                </SegmentedButton>
             </Field>
         </Fieldset>
     </Form>
@@ -272,6 +287,9 @@
                         <graphic>
                             <Glyph fontFamily="Font Awesome 5 Free Solid" fontSize="20" icon="ARROW_DOWN" />
                         </graphic>
+                        <tooltip>
+                            <Tooltip text="Connect to a server (bottom right toggle) to broadcast a transaction" />
+                        </tooltip>
                     </Button>
                     <Button fx:id="payjoinButton" defaultButton="true" HBox.hgrow="ALWAYS" text="Get Payjoin Transaction" contentDisplay="TOP" wrapText="true" textAlignment="CENTER" onAction="#getPayjoinTransaction">
                         <graphic>

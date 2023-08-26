@@ -69,7 +69,7 @@ public class ElectrumServer {
 
     private static Server coreElectrumServer;
 
-    private static final Pattern RPC_WALLET_LOADING_PATTERN = Pattern.compile(".*\"(Wallet loading failed:[^\"]*)\".*");
+    private static final Pattern RPC_WALLET_LOADING_PATTERN = Pattern.compile(".*\"(Wallet loading failed[:.][^\"]*)\".*");
 
     private static synchronized CloseableTransport getTransport() throws ServerException {
         if(transport == null) {
@@ -692,7 +692,9 @@ public class ElectrumServer {
         //First check all provided txes that pay to this node
         Script nodeScript = node.getOutputScript();
         Set<BlockTransactionHash> history = nodeTransactionMap.get(node);
+        Map<Sha256Hash, BlockTransactionHash> txHashHistory = new HashMap<>();
         for(BlockTransactionHash reference : history) {
+            txHashHistory.put(reference.getHash(), reference);
             BlockTransaction blockTransaction = wallet.getTransactions().get(reference.getHash());
             if(blockTransaction == null) {
                 throw new IllegalStateException("Did not retrieve transaction for hash " + reference.getHashAsString());
@@ -731,14 +733,13 @@ public class ElectrumServer {
                     throw new IllegalStateException("Could not retrieve transaction for hash " + reference.getHashAsString());
                 }
 
-                Optional<BlockTransactionHash> optionalTxHash = history.stream().filter(txHash -> txHash.getHash().equals(previousHash)).findFirst();
-                if(optionalTxHash.isEmpty()) {
+                BlockTransactionHash spentTxHash = txHashHistory.get(previousHash);
+                if(spentTxHash == null) {
                     //No previous transaction history found, cannot check if spends from wallet
                     //This is fine so long as all referenced transactions have been returned, in which case this refers to a transaction that does not affect this wallet node
                     continue;
                 }
 
-                BlockTransactionHash spentTxHash = optionalTxHash.get();
                 TransactionOutput spentOutput = previousTransaction.getTransaction().getOutputs().get((int)input.getOutpoint().getIndex());
                 if(spentOutput.getScript().equals(nodeScript)) {
                     BlockTransactionHashIndex spendingTXI = new BlockTransactionHashIndex(reference.getHash(), reference.getHeight(), blockTransaction.getDate(), reference.getFee(), inputIndex, spentOutput.getValue());
@@ -835,9 +836,9 @@ public class ElectrumServer {
     }
 
     public Set<MempoolRateSize> getMempoolRateSizes() throws ServerException {
-        Map<Long, Long> feeRateHistogram = electrumServerRpc.getFeeRateHistogram(getTransport());
+        Map<Double, Long> feeRateHistogram = electrumServerRpc.getFeeRateHistogram(getTransport());
         Set<MempoolRateSize> mempoolRateSizes = new TreeSet<>();
-        for(Long fee : feeRateHistogram.keySet()) {
+        for(Double fee : feeRateHistogram.keySet()) {
             mempoolRateSizes.add(new MempoolRateSize(fee, feeRateHistogram.get(fee)));
         }
 
@@ -1106,7 +1107,7 @@ public class ElectrumServer {
                                 throw new CormorantBitcoindException("Legacy wallet configured");
                             }
                             if(ElectrumServer.cormorant == null) {
-                                ElectrumServer.cormorant = new Cormorant();
+                                ElectrumServer.cormorant = new Cormorant(subscribe);
                                 ElectrumServer.coreElectrumServer = cormorant.start();
                             }
                         } catch(CormorantBitcoindException e) {
@@ -1141,6 +1142,10 @@ public class ElectrumServer {
                                                 throw new ServerException("Groestlcoin Core requires Multi-Wallet to be enabled in the Server Preferences");
                                             } else if(bwtStartException.getMessage().contains("Upgrade Groestlcoin Core to v24 or later for Taproot wallet support")) {
                                                 throw new ServerException(bwtStartException.getMessage());
+                                            } else if(bwtStartException.getMessage().contains("Wallet file verification failed. Refusing to load database.")) {
+                                                throw new ServerException("Bitcoin Core wallet file verification failed. Try restarting Bitcoin Core.");
+                                            } else if(bwtStartException.getMessage().contains("This error could be caused by pruning or data corruption")) {
+                                                throw new ServerException("Scanning failed. Bitcoin Core is pruned to a date after the wallet birthday.");
                                             } else if(walletLoadingMatcher.matches() && walletLoadingMatcher.group(1) != null) {
                                                 throw new ServerException(walletLoadingMatcher.group(1));
                                             }
@@ -1325,6 +1330,13 @@ public class ElectrumServer {
             } finally {
                 bwtStartLock.unlock();
             }
+        }
+
+        @Subscribe
+        public void mempoolEntriesInitialized(MempoolEntriesInitializedEvent event) throws ServerException {
+            ElectrumServer electrumServer = new ElectrumServer();
+            Set<MempoolRateSize> mempoolRateSizes = electrumServer.getMempoolRateSizes();
+            EventManager.get().post(new MempoolRateSizesUpdatedEvent(mempoolRateSizes));
         }
     }
 
@@ -1767,15 +1779,22 @@ public class ElectrumServer {
 
     public static class AddressUtxosService extends Service<List<TransactionOutput>> {
         private final Address address;
+        private final Date since;
 
-        public AddressUtxosService(Address address) {
+        public AddressUtxosService(Address address, Date since) {
             this.address = address;
+            this.since = since;
         }
 
         @Override
         protected Task<List<TransactionOutput>> createTask() {
             return new Task<>() {
                 protected List<TransactionOutput> call() throws ServerException {
+                    if(ElectrumServer.cormorant != null) {
+                        updateProgress(-1, 0);
+                        ElectrumServer.cormorant.checkAddressImport(address, since);
+                    }
+
                     ElectrumServer electrumServer = new ElectrumServer();
                     return electrumServer.getUtxos(address);
                 }

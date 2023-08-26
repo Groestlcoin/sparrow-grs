@@ -1,5 +1,6 @@
 package com.sparrowwallet.sparrow.control;
 
+import com.google.common.base.Throwables;
 import com.google.common.io.Files;
 import com.sparrowwallet.drongo.KeyPurpose;
 import com.sparrowwallet.drongo.address.Address;
@@ -14,7 +15,10 @@ import com.sparrowwallet.drongo.psbt.PSBTInput;
 import com.sparrowwallet.drongo.wallet.Wallet;
 import com.sparrowwallet.sparrow.AppServices;
 import com.sparrowwallet.sparrow.glyphfont.FontAwesome5;
+import com.sparrowwallet.sparrow.io.CardApi;
+import com.sparrowwallet.sparrow.io.Config;
 import com.sparrowwallet.sparrow.net.ElectrumServer;
+import com.sparrowwallet.sparrow.net.ServerType;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.event.ActionEvent;
@@ -42,7 +46,8 @@ import tornadofx.control.Form;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Date;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -95,6 +100,14 @@ public class PrivateKeySweepDialog extends Dialog<Transaction> {
         keyBox.getChildren().addAll(key, keyButtonBox);
         HBox.setHgrow(key, Priority.ALWAYS);
         keyField.getInputs().add(keyBox);
+
+        if(CardApi.isReaderAvailable()) {
+            VBox cardButtonBox = new VBox(5);
+            Button cardKey = new Button("", getGlyph(FontAwesome5.Glyph.WIFI));
+            cardKey.setOnAction(event -> unsealPrivateKey());
+            cardButtonBox.getChildren().add(cardKey);
+            keyBox.getChildren().add(cardButtonBox);
+        }
 
         Field keyScriptTypeField = new Field();
         keyScriptTypeField.setText("Script Type:");
@@ -279,6 +292,16 @@ public class PrivateKeySweepDialog extends Dialog<Transaction> {
         }
     }
 
+    private void unsealPrivateKey() {
+        DeviceUnsealDialog deviceUnsealDialog = new DeviceUnsealDialog(Collections.emptyList());
+        Optional<DeviceUnsealDialog.DevicePrivateKey> optPrivateKey = deviceUnsealDialog.showAndWait();
+        if(optPrivateKey.isPresent()) {
+            DeviceUnsealDialog.DevicePrivateKey devicePrivateKey = optPrivateKey.get();
+            key.setText(devicePrivateKey.privateKey().getPrivateKeyEncoded().toBase58());
+            keyScriptType.setValue(devicePrivateKey.scriptType());
+        }
+    }
+
     private void createTransaction() {
         try {
             DumpedPrivateKey privateKey = getPrivateKey();
@@ -286,14 +309,30 @@ public class PrivateKeySweepDialog extends Dialog<Transaction> {
             Address fromAddress = scriptType.getAddress(privateKey.getKey());
             Address destAddress = getToAddress();
 
-            ElectrumServer.AddressUtxosService addressUtxosService = new ElectrumServer.AddressUtxosService(fromAddress);
+            Date since = null;
+            if(Config.get().getServerType() == ServerType.BITCOIN_CORE) {
+                WalletBirthDateDialog addressScanDateDialog = new WalletBirthDateDialog(null, true);
+                Optional<Date> optSince = addressScanDateDialog.showAndWait();
+                if(optSince.isPresent()) {
+                    since = optSince.get();
+                }
+            }
+
+            ElectrumServer.AddressUtxosService addressUtxosService = new ElectrumServer.AddressUtxosService(fromAddress, since);
             addressUtxosService.setOnSucceeded(successEvent -> {
                 createTransaction(privateKey.getKey(), scriptType, addressUtxosService.getValue(), destAddress);
             });
             addressUtxosService.setOnFailed(failedEvent -> {
+                Throwable rootCause = Throwables.getRootCause(failedEvent.getSource().getException());
                 log.error("Error retrieving outputs for address " + fromAddress, failedEvent.getSource().getException());
-                AppServices.showErrorDialog("Error retrieving outputs for address", failedEvent.getSource().getException().getMessage());
+                AppServices.showErrorDialog("Error retrieving outputs for address", rootCause.getMessage());
             });
+
+            if(Config.get().getServerType() == ServerType.BITCOIN_CORE) {
+                ServiceProgressDialog serviceProgressDialog = new ServiceProgressDialog("Address Scan", "Scanning address for transactions...", "/image/sparrow.png", addressUtxosService);
+                AppServices.moveToActiveWindowScreen(serviceProgressDialog);
+            }
+
             addressUtxosService.start();
         } catch(Exception e) {
             log.error("Error creating sweep transaction", e);
@@ -321,8 +360,13 @@ public class PrivateKeySweepDialog extends Dialog<Transaction> {
 
         long dustThreshold = destAddress.getScriptType().getDustThreshold(sweepOutput, Transaction.DUST_RELAY_TX_FEE);
         if(total - fee <= dustThreshold) {
-            AppServices.showErrorDialog("Insufficient funds", "The unspent outputs for this private key contain insufficient funds to spend (" + total + " sats).");
-            return;
+            feeRate = Transaction.DEFAULT_MIN_RELAY_FEE;
+            fee = (long)Math.ceil(noFeeTransaction.getVirtualSize() * feeRate) + 1;
+
+            if(total - fee <= dustThreshold) {
+                AppServices.showErrorDialog("Insufficient funds", "The unspent outputs for this private key contain insufficient funds to spend (" + total + " sats).");
+                return;
+            }
         }
 
         Transaction transaction = new Transaction();
@@ -334,11 +378,17 @@ public class PrivateKeySweepDialog extends Dialog<Transaction> {
         transaction.addOutput(new TransactionOutput(transaction, total - fee, destAddress.getOutputScript()));
 
         PSBT psbt = new PSBT(transaction);
+        //Set witness UTXOs on PSBT inputs first - they are all required when hashing for a Taproot signature
+        for(int i = 0; i < txOutputs.size(); i++) {
+            TransactionOutput utxoOutput = txOutputs.get(i);
+            PSBTInput psbtInput = psbt.getPsbtInputs().get(i);
+            psbtInput.setWitnessUtxo(utxoOutput);
+        }
+
         for(int i = 0; i < txOutputs.size(); i++) {
             TransactionOutput utxoOutput = txOutputs.get(i);
             TransactionInput txInput = transaction.getInputs().get(i);
             PSBTInput psbtInput = psbt.getPsbtInputs().get(i);
-            psbtInput.setWitnessUtxo(utxoOutput);
 
             if(ScriptType.P2SH.isScriptType(utxoOutput.getScript())) {
                 psbtInput.setRedeemScript(txInput.getScriptSig().getFirstNestedScript());

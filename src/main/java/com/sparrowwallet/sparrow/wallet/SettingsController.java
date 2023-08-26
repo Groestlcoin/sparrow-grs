@@ -9,6 +9,8 @@ import com.sparrowwallet.drongo.protocol.ScriptType;
 import com.sparrowwallet.drongo.wallet.*;
 import com.sparrowwallet.hummingbird.UR;
 import com.sparrowwallet.hummingbird.registry.*;
+import com.sparrowwallet.hummingbird.registry.pathcomponent.IndexPathComponent;
+import com.sparrowwallet.hummingbird.registry.pathcomponent.PathComponent;
 import com.sparrowwallet.sparrow.AppServices;
 import com.sparrowwallet.sparrow.EventManager;
 import com.sparrowwallet.sparrow.control.*;
@@ -38,6 +40,7 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 import static com.sparrowwallet.sparrow.AppServices.showErrorDialog;
+import static com.sparrowwallet.sparrow.AppServices.showWarningDialog;
 
 public class SettingsController extends WalletFormController implements Initializable {
     private static final Logger log = LoggerFactory.getLogger(SettingsController.class);
@@ -95,6 +98,7 @@ public class SettingsController extends WalletFormController implements Initiali
     private final SimpleIntegerProperty totalKeystores = new SimpleIntegerProperty(0);
 
     private boolean initialising = true;
+    private boolean reverting;
 
     @Override
     public void initialize(URL location, ResourceBundle resources) {
@@ -139,9 +143,32 @@ public class SettingsController extends WalletFormController implements Initiali
             }
         });
 
-        scriptType.getSelectionModel().selectedItemProperty().addListener((observable, oldValue, scriptType) -> {
-            if(scriptType != null) {
-                walletForm.getWallet().setScriptType(scriptType);
+        scriptType.getSelectionModel().selectedItemProperty().addListener((observable, oldValue, newValue) -> {
+            if(newValue != null) {
+                if(oldValue != null && !reverting && walletForm.getWallet().getKeystores().stream().anyMatch(keystore -> keystore.getExtendedPublicKey() != null)) {
+                    Optional<ButtonType> optType = showWarningDialog("Clear keystores?",
+                            "You are changing the script type on a wallet with existing key information. Usually this means the keys need to be re-imported using a different derivation path.\n\n" +
+                                    "Do you want to clear the current key information?", ButtonType.YES, ButtonType.NO, ButtonType.CANCEL);
+                    if(optType.isPresent()) {
+                        if(optType.get() == ButtonType.CANCEL) {
+                            reverting = true;
+                            Platform.runLater(() -> {
+                                scriptType.getSelectionModel().select(oldValue);
+                                reverting = false;
+                            });
+                            return;
+                        } else if(optType.get() == ButtonType.YES) {
+                            clearKeystoreTabs();
+                            if(walletForm.getWallet().getPolicyType() == PolicyType.MULTI) {
+                                totalKeystores.bind(multisigControl.highValueProperty());
+                            } else {
+                                totalKeystores.set(1);
+                            }
+                        }
+                    }
+                }
+
+                walletForm.getWallet().setScriptType(newValue);
             }
 
             EventManager.get().post(new SettingsChangedEvent(walletForm.getWallet(), SettingsChangedEvent.Type.SCRIPT_TYPE));
@@ -213,7 +240,10 @@ public class SettingsController extends WalletFormController implements Initiali
             totalKeystores.setValue(0);
             walletForm.revert();
             initialising = true;
+            reverting = true;
             setFieldsFromWallet(walletForm.getWallet());
+            reverting = false;
+            initialising = false;
         });
 
         apply.setOnAction(event -> {
@@ -354,7 +384,11 @@ public class SettingsController extends WalletFormController implements Initiali
         if(wallet.getPolicyType() == PolicyType.SINGLE) {
             cryptoOutput = new CryptoOutput(scriptExpressions, getCryptoHDKey(wallet.getKeystores().get(0)));
         } else if(wallet.getPolicyType() == PolicyType.MULTI) {
-            List<CryptoHDKey> cryptoHDKeys = wallet.getKeystores().stream().map(this::getCryptoHDKey).collect(Collectors.toList());
+            WalletNode firstReceive = new WalletNode(wallet, KeyPurpose.RECEIVE, 0);
+            Utils.LexicographicByteArrayComparator lexicographicByteArrayComparator = new Utils.LexicographicByteArrayComparator();
+            List<CryptoHDKey> cryptoHDKeys = wallet.getKeystores().stream().sorted((keystore1, keystore2) -> {
+                return lexicographicByteArrayComparator.compare(keystore1.getPubKey(firstReceive).getPubKey(), keystore2.getPubKey(firstReceive).getPubKey());
+            }).map(this::getCryptoHDKey).collect(Collectors.toList());
             MultiKey multiKey = new MultiKey(wallet.getDefaultPolicy().getNumSignaturesRequired(), null, cryptoHDKeys);
             List<ScriptExpression> multiScriptExpressions = new ArrayList<>(scriptExpressions);
             multiScriptExpressions.add(ScriptExpression.SORTED_MULTISIG);
@@ -389,7 +423,7 @@ public class SettingsController extends WalletFormController implements Initiali
     private CryptoHDKey getCryptoHDKey(Keystore keystore) {
         ExtendedKey extendedKey = keystore.getExtendedPublicKey();
         CryptoCoinInfo cryptoCoinInfo = new CryptoCoinInfo(CryptoCoinInfo.Type.BITCOIN.ordinal(), Network.get() == Network.MAINNET ? CryptoCoinInfo.Network.MAINNET.ordinal() : CryptoCoinInfo.Network.TESTNET.ordinal());
-        List<PathComponent> pathComponents = keystore.getKeyDerivation().getDerivation().stream().map(cNum -> new PathComponent(cNum.num(), cNum.isHardened())).collect(Collectors.toList());
+        List<PathComponent> pathComponents = keystore.getKeyDerivation().getDerivation().stream().map(cNum -> new IndexPathComponent(cNum.num(), cNum.isHardened())).collect(Collectors.toList());
         CryptoKeypath cryptoKeypath = new CryptoKeypath(pathComponents, Utils.hexToBytes(keystore.getKeyDerivation().getMasterFingerprint()), pathComponents.size());
         return new CryptoHDKey(false, extendedKey.getKey().getPubKey(), extendedKey.getKey().getChainCode(), cryptoCoinInfo, cryptoKeypath, null, extendedKey.getParentFingerprint());
     }
@@ -416,19 +450,26 @@ public class SettingsController extends WalletFormController implements Initiali
         try {
             OutputDescriptor editedOutputDescriptor = OutputDescriptor.getOutputDescriptor(text.trim().replace("\\", ""));
             Wallet editedWallet = editedOutputDescriptor.toWallet();
-
-            editedWallet.setName(getWalletForm().getWallet().getName());
-            keystoreTabs.getTabs().removeAll(keystoreTabs.getTabs());
-            totalKeystores.unbind();
-            totalKeystores.setValue(0);
-            walletForm.setWallet(editedWallet);
-            initialising = true;
-            setFieldsFromWallet(editedWallet);
-
-            EventManager.get().post(new SettingsChangedEvent(editedWallet, SettingsChangedEvent.Type.POLICY));
+            replaceWallet(editedWallet);
         } catch(Exception e) {
             AppServices.showErrorDialog("Invalid output descriptor", e.getMessage());
         }
+    }
+
+    private void replaceWallet(Wallet editedWallet) {
+        editedWallet.setName(getWalletForm().getWallet().getName());
+        editedWallet.setBirthDate(getWalletForm().getWallet().getBirthDate());
+        editedWallet.setGapLimit(getWalletForm().getWallet().getGapLimit());
+        editedWallet.setWatchLast(getWalletForm().getWallet().getWatchLast());
+        editedWallet.setMasterWallet(getWalletForm().getWallet().getMasterWallet());
+        keystoreTabs.getTabs().removeAll(keystoreTabs.getTabs());
+        totalKeystores.unbind();
+        totalKeystores.setValue(0);
+        walletForm.setWallet(editedWallet);
+        initialising = true;
+        setFieldsFromWallet(editedWallet);
+
+        EventManager.get().post(new SettingsChangedEvent(editedWallet, SettingsChangedEvent.Type.POLICY));
     }
 
     public void showDescriptor(ActionEvent event) {
@@ -628,6 +669,7 @@ public class SettingsController extends WalletFormController implements Initiali
                 if(!storage.isPersisted(childWallet)) {
                     try {
                         storage.saveWallet(childWallet);
+                        EventManager.get().post(new NewChildWalletSavedEvent(storage, masterWallet, childWallet));
                     } catch(Exception e) {
                         log.error("Error saving wallet", e);
                         AppServices.showErrorDialog("Error saving wallet " + childWallet.getName(), e.getMessage());
@@ -712,6 +754,38 @@ public class SettingsController extends WalletFormController implements Initiali
     public void childWalletsAdded(ChildWalletsAddedEvent event) {
         if(event.getMasterWalletId().equals(walletForm.getWalletId())) {
             setInputFieldsDisabled(true);
+        }
+    }
+
+    @Subscribe
+    public void newChildWalletSaved(NewChildWalletSavedEvent event) {
+        if(event.getMasterWalletId().equals(walletForm.getMasterWalletId())) {
+            ((SettingsWalletForm)walletForm).childWalletSaved(event.getChildWallet());
+        }
+    }
+
+    @Subscribe
+    public void walletGapLimitChanged(WalletGapLimitChangedEvent event) {
+        if(walletForm.getWalletId().equals(event.getWalletId())) {
+            ((SettingsWalletForm)walletForm).gapLimitChanged(event.getGapLimit());
+        }
+    }
+
+    @Subscribe
+    public void existingWalletImported(ExistingWalletImportedEvent event) {
+        if(event.getExistingWalletId().equals(getWalletForm().getWalletId())) {
+            List<Keystore> importedKeystores = event.getImportedWallet().getKeystores();
+            List<Keystore> nonWatchKeystores = walletForm.getWallet().getKeystores().stream().filter(k -> k.isValid() && k.getSource() != KeystoreSource.SW_WATCH).collect(Collectors.toList());
+            for(Keystore nonWatchKeystore : nonWatchKeystores) {
+                Optional<Keystore> optReplacedKeystore = importedKeystores.stream().filter(k -> nonWatchKeystore.getExtendedPublicKey().equals(k.getExtendedPublicKey())).findFirst();
+                if(optReplacedKeystore.isPresent()) {
+                    int index = importedKeystores.indexOf(optReplacedKeystore.get());
+                    importedKeystores.remove(index);
+                    importedKeystores.add(index, nonWatchKeystore);
+                }
+            }
+
+            replaceWallet(event.getImportedWallet());
         }
     }
 

@@ -8,13 +8,9 @@ import com.samourai.wallet.cahoots.Cahoots;
 import com.samourai.wallet.cahoots.CahootsType;
 import com.sparrowwallet.drongo.protocol.Transaction;
 import com.sparrowwallet.drongo.psbt.PSBTParseException;
-import com.sparrowwallet.drongo.wallet.BlockTransactionHashIndex;
-import com.sparrowwallet.drongo.wallet.Status;
-import com.sparrowwallet.drongo.wallet.Wallet;
-import com.sparrowwallet.drongo.wallet.WalletNode;
+import com.sparrowwallet.drongo.wallet.*;
 import com.sparrowwallet.sparrow.AppServices;
 import com.sparrowwallet.sparrow.control.*;
-import com.sparrowwallet.sparrow.io.Config;
 import com.sparrowwallet.sparrow.paynym.PayNymDialog;
 import com.sparrowwallet.sparrow.paynym.PayNymService;
 import io.reactivex.rxjavafx.schedulers.JavaFxScheduler;
@@ -298,11 +294,9 @@ public class CounterpartyController extends SorobanController {
         sorobanProgressLabel.setText("Creating mix transaction...");
 
         Soroban soroban = AppServices.getSorobanServices().getSoroban(walletId);
-        Map<BlockTransactionHashIndex, WalletNode> walletUtxos = wallet.getWalletUtxos();
+        Map<BlockTransactionHashIndex, WalletNode> walletUtxos = wallet.getSpendableUtxos();
         for(Map.Entry<BlockTransactionHashIndex, WalletNode> entry : walletUtxos.entrySet()) {
-            if(entry.getKey().getStatus() != Status.FROZEN) {
-                counterpartyCahootsWallet.addUtxo(entry.getValue(), wallet.getWalletTransaction(entry.getKey().getHash()), (int)entry.getKey().getIndex());
-            }
+            counterpartyCahootsWallet.addUtxo(entry.getValue(), wallet.getWalletTransaction(entry.getKey().getHash()), (int)entry.getKey().getIndex());
         }
 
         try {

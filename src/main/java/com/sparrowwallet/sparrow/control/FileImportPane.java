@@ -162,8 +162,8 @@ public abstract class FileImportPane extends TitledDescriptionPane {
                     setError("Import Error", e.getMessage());
                 }
             } else if(result.outputDescriptor != null) {
-                wallets = List.of(result.outputDescriptor.toKeystoreWallet(null));
                 try {
+                    wallets = List.of(result.outputDescriptor.toWallet());
                     importFile(importer.getName(), null, null);
                 } catch(ImportException e) {
                     log.error("Error importing QR", e);
@@ -193,6 +193,10 @@ public abstract class FileImportPane extends TitledDescriptionPane {
         }
     }
 
+    protected List<Wallet> getScannedWallets() {
+        return wallets;
+    }
+
     protected Keystore getScannedKeystore(ScriptType scriptType) throws ImportException {
         if(wallets != null) {
             for(Wallet wallet : wallets) {
@@ -215,7 +219,7 @@ public abstract class FileImportPane extends TitledDescriptionPane {
 
     private Node getPasswordEntry(File file) {
         CustomPasswordField passwordField = new ViewPasswordField();
-        passwordField.setPromptText("Wallet password");
+        passwordField.setPromptText("Password");
         password.bind(passwordField.textProperty());
         HBox.setHgrow(passwordField, Priority.ALWAYS);
 

@@ -8,6 +8,7 @@ import com.sparrowwallet.drongo.wallet.StandardAccount;
 import com.sparrowwallet.drongo.wallet.Wallet;
 import com.sparrowwallet.sparrow.AppServices;
 import com.sparrowwallet.sparrow.SparrowWallet;
+import com.sparrowwallet.sparrow.control.WalletPasswordDialog;
 import com.sparrowwallet.sparrow.soroban.Soroban;
 import com.sparrowwallet.sparrow.whirlpool.Whirlpool;
 import javafx.concurrent.ScheduledService;
@@ -146,6 +147,14 @@ public class Storage {
         if(wallet.containsMasterPrivateKeys()) {
             //Derive xpub and master fingerprint from seed, potentially with passphrase
             Wallet copy = wallet.copy(false);
+            if(wallet.isEncrypted()) {
+                if(key == null) {
+                    throw new IllegalStateException("Wallet was not encrypted, but seed is");
+                }
+
+                copy.decrypt(key);
+            }
+
             for(int i = 0; i < copy.getKeystores().size(); i++) {
                 Keystore copyKeystore = copy.getKeystores().get(i);
                 if(copyKeystore.hasSeed() && copyKeystore.getSeed().getPassphrase() == null) {
@@ -164,14 +173,6 @@ public class Storage {
                         copyKeystore.getSeed().setPassphrase("");
                     }
                 }
-            }
-
-            if(wallet.isEncrypted()) {
-                if(key == null) {
-                    throw new IllegalStateException("Wallet was not encrypted, but seed is");
-                }
-
-                copy.decrypt(key);
             }
 
             if(wallet.isWhirlpoolMasterWallet()) {
@@ -264,8 +265,11 @@ public class Storage {
         persistence.copyWallet(walletFile, outputStream);
     }
 
-    public boolean delete() {
-        deleteBackups();
+    public boolean delete(boolean deleteBackups) {
+        if(deleteBackups) {
+            deleteBackups();
+        }
+
         return IOUtils.secureDelete(walletFile);
     }
 
@@ -734,18 +738,44 @@ public class Storage {
         }
     }
 
+    public static class CopyWalletService extends Service<Void> {
+        private final Wallet wallet;
+        private final File newWalletFile;
+
+        public CopyWalletService(Wallet wallet, File newWalletFile) {
+            this.wallet = wallet;
+            this.newWalletFile = newWalletFile;
+        }
+
+        @Override
+        protected Task<Void> createTask() {
+            return new Task<>() {
+                protected Void call() throws IOException, ExportException {
+                    Sparrow export = new Sparrow();
+                    try(BufferedOutputStream outputStream = new BufferedOutputStream(new FileOutputStream(newWalletFile))) {
+                        export.exportWallet(wallet, outputStream);
+                    }
+
+                    return null;
+                }
+            };
+        }
+    }
+
     public static class DeleteWalletService extends ScheduledService<Boolean> {
         private final Storage storage;
+        private final boolean deleteBackups;
 
-        public DeleteWalletService(Storage storage) {
+        public DeleteWalletService(Storage storage, boolean deleteBackups) {
             this.storage = storage;
+            this.deleteBackups = deleteBackups;
         }
 
         @Override
         protected Task<Boolean> createTask() {
             return new Task<>() {
                 protected Boolean call() {
-                    return storage.delete();
+                    return storage.delete(deleteBackups);
                 }
             };
         }

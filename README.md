@@ -40,7 +40,7 @@ If you prefer to run Sparrow-GRS directly from source, it can be launched from w
 
 `./sparrow-grs`
 
-Java 17 or higher must be installed.
+Java 18 or higher must be installed.
 
 ## Configuration
 

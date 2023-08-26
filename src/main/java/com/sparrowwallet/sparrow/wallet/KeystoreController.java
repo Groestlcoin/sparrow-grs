@@ -2,6 +2,7 @@ package com.sparrowwallet.sparrow.wallet;
 
 import com.google.common.eventbus.Subscribe;
 import com.sparrowwallet.drongo.*;
+import com.sparrowwallet.drongo.policy.PolicyType;
 import com.sparrowwallet.drongo.wallet.*;
 import com.sparrowwallet.sparrow.AppServices;
 import com.sparrowwallet.sparrow.EventManager;
@@ -9,16 +10,21 @@ import com.sparrowwallet.sparrow.control.*;
 import com.sparrowwallet.sparrow.event.*;
 import com.sparrowwallet.sparrow.glyphfont.FontAwesome5;
 import com.sparrowwallet.sparrow.glyphfont.FontAwesome5Brands;
+import com.sparrowwallet.sparrow.io.CardApi;
 import com.sparrowwallet.sparrow.io.Storage;
 import com.sparrowwallet.sparrow.keystoreimport.KeystoreImportDialog;
 import javafx.application.Platform;
+import javafx.beans.value.ChangeListener;
+import javafx.concurrent.Service;
 import javafx.event.ActionEvent;
 import javafx.fxml.FXML;
 import javafx.fxml.Initializable;
+import javafx.scene.Node;
 import javafx.scene.control.*;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.StackPane;
+import org.controlsfx.control.SegmentedButton;
 import org.controlsfx.glyphfont.Glyph;
 import org.controlsfx.validation.ValidationResult;
 import org.controlsfx.validation.ValidationSupport;
@@ -28,10 +34,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tornadofx.control.Field;
 
+import javax.smartcardio.CardException;
 import java.net.URL;
+import java.util.Base64;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.ResourceBundle;
 import java.util.stream.Collectors;
+
+import static com.sparrowwallet.sparrow.io.CardApi.isReaderAvailable;
 
 public class KeystoreController extends WalletFormController implements Initializable {
     private static final Logger log = LoggerFactory.getLogger(KeystoreController.class);
@@ -50,10 +61,19 @@ public class KeystoreController extends WalletFormController implements Initiali
     private Label type;
 
     @FXML
+    private Button exportButton;
+
+    @FXML
     private Button viewSeedButton;
 
     @FXML
     private Button viewKeyButton;
+
+    @FXML
+    private ToggleGroup cardServiceToggleGroup;
+
+    @FXML
+    private SegmentedButton cardServiceButtons;
 
     @FXML
     private Button importButton;
@@ -87,6 +107,11 @@ public class KeystoreController extends WalletFormController implements Initiali
 
     private final ValidationSupport validationSupport = new ValidationSupport();
 
+    private final ChangeListener<String> labelChangeListener = (observable, oldValue, newValue) -> {
+        keystore.setLabel(newValue);
+        EventManager.get().post(new SettingsChangedEvent(walletForm.getWallet(), SettingsChangedEvent.Type.KEYSTORE_LABEL));
+    };
+
     @Override
     public void initialize(URL location, ResourceBundle resources) {
         EventManager.get().register(this);
@@ -114,13 +139,15 @@ public class KeystoreController extends WalletFormController implements Initiali
            }
         }
 
+        exportButton.managedProperty().bind(exportButton.visibleProperty());
         viewSeedButton.managedProperty().bind(viewSeedButton.visibleProperty());
         viewKeyButton.managedProperty().bind(viewKeyButton.visibleProperty());
+        cardServiceButtons.managedProperty().bind(cardServiceButtons.visibleProperty());
         scanXpubQR.managedProperty().bind(scanXpubQR.visibleProperty());
         displayXpubQR.managedProperty().bind(displayXpubQR.visibleProperty());
         displayXpubQR.visibleProperty().bind(scanXpubQR.visibleProperty().not());
 
-        updateType();
+        updateType(keystore.isValid() && !getWalletForm().getWallet().isValid());
 
         label.setText(keystore.getLabel());
 
@@ -142,10 +169,7 @@ public class KeystoreController extends WalletFormController implements Initiali
             keystore.setKeyDerivation(new KeyDerivation("",""));
         }
 
-        label.textProperty().addListener((observable, oldValue, newValue) -> {
-            keystore.setLabel(newValue);
-            EventManager.get().post(new SettingsChangedEvent(walletForm.getWallet(), SettingsChangedEvent.Type.KEYSTORE_LABEL));
-        });
+        label.textProperty().addListener(labelChangeListener);
         fingerprint.textProperty().addListener((observable, oldValue, newValue) -> {
             keystore.setKeyDerivation(new KeyDerivation(newValue, keystore.getKeyDerivation().getDerivationPath()));
             fingerprintIcon.setHex(newValue.length() == 8 ? newValue : null);
@@ -180,7 +204,9 @@ public class KeystoreController extends WalletFormController implements Initiali
             scanXpubQR.setVisible(!valid);
         });
 
-        setInputFieldsDisabled(keystore.getSource() != KeystoreSource.SW_WATCH && (!walletForm.getWallet().isMasterWallet() || !walletForm.getWallet().getChildWallets().isEmpty()));
+        if(keystore.getSource() != KeystoreSource.SW_WATCH && (!walletForm.getWallet().isMasterWallet() || !walletForm.getWallet().getChildWallets().isEmpty())) {
+            setInputFieldsDisabled(true);
+        }
     }
 
     private void setXpubContext(ExtendedKey extendedKey) {
@@ -267,11 +293,13 @@ public class KeystoreController extends WalletFormController implements Initiali
         ));
     }
 
-    private void updateType() {
+    private void updateType(boolean showExport) {
         type.setText(getTypeLabel(keystore));
         type.setGraphic(getTypeIcon(keystore));
+        exportButton.setVisible(showExport && getWalletForm().getWallet().getPolicyType() == PolicyType.MULTI);
         viewSeedButton.setVisible(keystore.getSource() == KeystoreSource.SW_SEED && keystore.hasSeed());
         viewKeyButton.setVisible(keystore.getSource() == KeystoreSource.SW_SEED && keystore.hasMasterPrivateExtendedKey());
+        cardServiceButtons.setVisible(keystore.getWalletModel().isCard());
 
         importButton.setText(keystore.getSource() == KeystoreSource.SW_WATCH ? "Import..." : "Replace...");
         importButton.setTooltip(new Tooltip(keystore.getSource() == KeystoreSource.SW_WATCH ? "Import a keystore from an external source" : "Replace this keystore with another source"));
@@ -295,9 +323,9 @@ public class KeystoreController extends WalletFormController implements Initiali
     private String getTypeLabel(Keystore keystore) {
         switch (keystore.getSource()) {
             case HW_USB:
-                return "Connected Hardware Wallet (" + keystore.getWalletModel().toDisplayString() + ")";
+                return "Connected Wallet (" + keystore.getWalletModel().toDisplayString() + ")";
             case HW_AIRGAPPED:
-                return "Airgapped Hardware Wallet (" + keystore.getWalletModel().toDisplayString() + ")";
+                return "Airgapped Wallet (" + keystore.getWalletModel().toDisplayString() + ")";
             case SW_SEED:
                 return "Software Wallet";
             case SW_WATCH:
@@ -306,7 +334,11 @@ public class KeystoreController extends WalletFormController implements Initiali
         }
     }
 
-    private Glyph getTypeIcon(Keystore keystore) {
+    private Node getTypeIcon(Keystore keystore) {
+        return new WalletIcon(getWalletForm().getStorage(), getWalletForm().getWallet(), keystore, getDefaultTypeIcon(keystore));
+    }
+
+    private Glyph getDefaultTypeIcon(Keystore keystore) {
         switch (keystore.getSource()) {
             case HW_USB:
                 return new Glyph(FontAwesome5Brands.FONT_NAME, FontAwesome5Brands.Glyph.USB);
@@ -330,7 +362,7 @@ public class KeystoreController extends WalletFormController implements Initiali
     }
 
     private void launchImportDialog(KeystoreSource initialSource) {
-        boolean restrictSource = keystoreSourceToggleGroup.getToggles().stream().anyMatch(toggle -> ((ToggleButton)toggle).isDisabled());
+        boolean restrictSource = keystore.getSource() != KeystoreSource.SW_WATCH && keystoreSourceToggleGroup.getToggles().stream().anyMatch(toggle -> ((ToggleButton)toggle).isDisabled());
         KeyDerivation requiredDerivation = restrictSource ? keystore.getKeyDerivation() : null;
         WalletModel requiredModel = restrictSource ? keystore.getWalletModel() : null;
         KeystoreImportDialog dlg = new KeystoreImportDialog(getWalletForm().getWallet(), initialSource, requiredDerivation, requiredModel, restrictSource);
@@ -339,6 +371,14 @@ public class KeystoreController extends WalletFormController implements Initiali
             selectSourcePane.setVisible(false);
 
             Keystore importedKeystore = result.get();
+            if(keystore.getSource() == KeystoreSource.SW_SEED && importedKeystore.getSource() != KeystoreSource.SW_SEED) {
+                Optional<ButtonType> optType = AppServices.showWarningDialog("Confirm Replacement",
+                        "You are replacing a software wallet with a " + importedKeystore.getSource().getDisplayName().toLowerCase(Locale.ROOT) + ", which will remove the seed. Are you sure?",
+                        ButtonType.NO, ButtonType.YES);
+                if(optType.isPresent() && optType.get() == ButtonType.NO) {
+                    return;
+                }
+            }
             walletForm.getWallet().makeLabelsUnique(importedKeystore);
             keystore.setSource(importedKeystore.getSource());
             keystore.setWalletModel(importedKeystore.getWalletModel());
@@ -349,7 +389,7 @@ public class KeystoreController extends WalletFormController implements Initiali
             keystore.setSeed(importedKeystore.getSeed());
             keystore.setBip47ExtendedPrivateKey(importedKeystore.getBip47ExtendedPrivateKey());
 
-            updateType();
+            updateType(true);
             label.setText(keystore.getLabel());
             fingerprint.setText(keystore.getKeyDerivation().getMasterFingerprint());
             derivation.setText(keystore.getKeyDerivation().getDerivationPath());
@@ -361,6 +401,11 @@ public class KeystoreController extends WalletFormController implements Initiali
                 xpub.setText("");
             }
         }
+    }
+
+    public void export(ActionEvent event) {
+        KeystoreExportDialog keystoreExportDialog = new KeystoreExportDialog(keystore);
+        keystoreExportDialog.showAndWait();
     }
 
     public void showPrivate(ActionEvent event) {
@@ -399,6 +444,97 @@ public class KeystoreController extends WalletFormController implements Initiali
         }
     }
 
+    public void changeCardPin(ActionEvent event) {
+        cardServiceToggleGroup.selectToggle(null);
+        changeCardPinOrBackup(false);
+    }
+
+    public void backupCard(ActionEvent event) {
+        cardServiceToggleGroup.selectToggle(null);
+        changeCardPinOrBackup(true);
+    }
+
+    public void changeCardPinOrBackup(boolean backupOnly) {
+        if(!isReaderAvailable()) {
+            AppServices.showErrorDialog("No card reader", "Connect a card reader to change the card PIN.");
+            return;
+        }
+
+        CardPinDialog cardPinDialog = new CardPinDialog(backupOnly);
+        Optional<CardPinDialog.CardPinChange> optPinChange = cardPinDialog.showAndWait();
+        if(optPinChange.isPresent()) {
+            String currentPin = optPinChange.get().currentPin();
+            String newPin = optPinChange.get().newPin();
+            boolean backupFirst = optPinChange.get().backupFirst();
+            try {
+                CardApi cardApi = CardApi.getCardApi(keystore.getWalletModel(), currentPin);
+                Service<Void> authDelayService = cardApi.getAuthDelayService();
+                if(authDelayService != null) {
+                    authDelayService.setOnSucceeded(event1 -> {
+                        try {
+                            changeCardPin(newPin, backupFirst, backupOnly, cardApi);
+                        } catch(CardException e) {
+                            log.error("Error communicating with card", e);
+                            AppServices.showErrorDialog("Error communicating with card", e.getMessage());
+                        }
+                    });
+                    authDelayService.setOnFailed(event1 -> {
+                        Throwable e = event1.getSource().getException();
+                        log.error("Error communicating with card", e);
+                        AppServices.showErrorDialog("Error communicating with card", e.getMessage());
+                    });
+                    ServiceProgressDialog serviceProgressDialog = new ServiceProgressDialog("Authentication Delay", "Waiting for authentication delay to clear...", "/image/tapsigner.png", authDelayService);
+                    AppServices.moveToActiveWindowScreen(serviceProgressDialog);
+                    authDelayService.start();
+                } else {
+                    changeCardPin(newPin, backupFirst, backupOnly, cardApi);
+                }
+            } catch(CardException e) {
+                log.error("Error communicating with card", e);
+                AppServices.showErrorDialog("Error communicating with card", e.getMessage());
+            }
+        }
+    }
+
+    private void changeCardPin(String newPin, boolean backupFirst, boolean backupOnly, CardApi cardApi) throws CardException {
+        boolean requiresBackup = cardApi.requiresBackup();
+        if(backupOnly || backupFirst || requiresBackup) {
+            Service<String> backupService = cardApi.getBackupService();
+            backupService.setOnSucceeded(event -> {
+                String backup = backupService.getValue();
+                String filename = fingerprint.getText() + ".aes";
+                TextAreaDialog backupDialog = new TextAreaDialog(backup, false, filename, Base64.getDecoder().decode(backup));
+                backupDialog.setTitle("Backup Private Key");
+                backupDialog.getDialogPane().setHeaderText((requiresBackup && !backupOnly ? "Please backup first by saving" : "Save") + " the following text in a safe place. It contains an encrypted copy of the card's private key, and can be decrypted using the backup key written on the back of the card.");
+                backupDialog.showAndWait();
+                if(!backupOnly) {
+                    try {
+                        changePin(newPin, cardApi);
+                    } catch(Exception e) {
+                        log.error("Error communicating with card", e);
+                        AppServices.showErrorDialog("Error communicating with card", e.getMessage());
+                    }
+                }
+            });
+            backupService.setOnFailed(event -> {
+                Throwable e = event.getSource().getException();
+                log.error("Error communicating with card", e);
+                AppServices.showErrorDialog("Error communicating with card", e.getMessage());
+            });
+            backupService.start();
+        } else {
+            changePin(newPin, cardApi);
+        }
+    }
+
+    private void changePin(String newPin, CardApi cardApi) throws CardException {
+        if(cardApi.changePin(newPin)) {
+            AppServices.showSuccessDialog("PIN changed", "The card's PIN has been changed.");
+        } else {
+            AppServices.showSuccessDialog("Could not change PIN", "The card's PIN was not changed.");
+        }
+    }
+
     public void scanXpubQR(ActionEvent event) {
         QRScanDialog qrScanDialog = new QRScanDialog();
         Optional<QRScanDialog.Result> optionalResult = qrScanDialog.showAndWait();
@@ -406,6 +542,9 @@ public class KeystoreController extends WalletFormController implements Initiali
             QRScanDialog.Result result = optionalResult.get();
             if(result.extendedKey != null && result.extendedKey.getKey().isPubKeyOnly()) {
                 xpub.setText(result.extendedKey.getExtendedKey());
+                if(result.extendedKeyName != null) {
+                    label.setText(result.extendedKeyName);
+                }
             } else if(result.outputDescriptor != null && !result.outputDescriptor.getExtendedPublicKeys().isEmpty()) {
                 ExtendedKey extendedKey = result.outputDescriptor.getExtendedPublicKeys().iterator().next();
                 KeyDerivation keyDerivation = result.outputDescriptor.getKeyDerivation(extendedKey);
@@ -502,6 +641,27 @@ public class KeystoreController extends WalletFormController implements Initiali
             if(keystore.getExtendedPublicKey() != null) {
                 setXpubContext(keystore.getExtendedPublicKey());
             }
+        }
+    }
+
+    @Subscribe
+    public void keystoreLabelsChanged(KeystoreLabelsChangedEvent event) {
+        if(event.getWalletId().equals(walletForm.getWalletId())) {
+            for(Keystore changedKeystore : event.getChangedKeystores()) {
+                if(xpub.getText().trim().equals(changedKeystore.getExtendedPublicKey().toString()) && !label.getText().equals(changedKeystore.getLabel())) {
+                    label.textProperty().removeListener(labelChangeListener);
+                    label.setText(changedKeystore.getLabel());
+                    keystore.setLabel(changedKeystore.getLabel());
+                    label.textProperty().addListener(labelChangeListener);
+                }
+            }
+        }
+    }
+
+    @Subscribe
+    public void walletSettingsChanged(WalletSettingsChangedEvent event) {
+        if(event.getWalletId().equals(walletForm.getWalletId())) {
+            exportButton.setVisible(false);
         }
     }
 }
