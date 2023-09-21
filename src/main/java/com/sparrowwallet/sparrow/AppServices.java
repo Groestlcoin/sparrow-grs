@@ -61,7 +61,6 @@ import java.awt.event.KeyEvent;
 import java.io.File;
 import java.io.IOException;
 import java.net.*;
-import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
@@ -809,15 +808,13 @@ public class AppServices {
             return;
         }
 
-        Server blockExplorer = Config.get().getBlockExplorer() == null ? BlockExplorer.BLOCKSTREAM_INFO.getServer() : Config.get().getBlockExplorer();
-        String url = blockExplorer.getUrl();
-        if(url.contains("{0}")) {
+        BlockExplorer blockExplorer = Config.get().getBlockExplorer() == null ? BlockExplorer.ESPLORA : Config.get().getBlockExplorer();
+        Server server = Network.get() == Network.MAINNET ? blockExplorer.getServer() : blockExplorer.getTestnetServer();
+        String url = server.getUrl();
+        if (url.contains("{0}")) {
             url = url.replace("{0}", txid);
         } else {
-            if(Network.get() != Network.MAINNET) {
-                url += "/" + Network.get().getName();
-            }
-            url += "/tx/" + txid;
+            url += blockExplorer.getTxPath() + txid;
         }
         AppServices.get().getApplication().getHostServices().showDocument(url);
     }

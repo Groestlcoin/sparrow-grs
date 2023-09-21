@@ -124,12 +124,12 @@ public class GeneralPreferencesController extends PreferencesDetailController {
                     Optional<String> optUrl = textfieldDialog.showAndWait();
                     if(optUrl.isPresent() && !optUrl.get().isEmpty()) {
                         try {
-                            Server server = getBlockExplorer(optUrl.get());
+                            BlockExplorer server = getBlockExplorer(optUrl.get());
                             config.setBlockExplorer(server);
                             Platform.runLater(() -> {
                                 blockExplorers.getSelectionModel().select(-1);
                                 blockExplorers.setItems(getBlockExplorerList());
-                                blockExplorers.setValue(Config.get().getBlockExplorer());
+                                blockExplorers.setValue(Config.get().getBlockExplorer().getServer());
                             });
                         } catch(Exception e) {
                             AppServices.showErrorDialog("Invalid URL", "The URL " + optUrl.get() + " is not valid.");
@@ -139,13 +139,13 @@ public class GeneralPreferencesController extends PreferencesDetailController {
                         blockExplorers.setValue(oldValue);
                     }
                 } else {
-                    Config.get().setBlockExplorer(newValue);
+                    Config.get().setBlockExplorer(BlockExplorer.from(newValue.getUrl()));
                 }
             }
         });
 
         if(config.getBlockExplorer() != null) {
-            blockExplorers.setValue(config.getBlockExplorer());
+            blockExplorers.setValue(config.getBlockExplorer().getServer());
         } else {
             blockExplorers.getSelectionModel().select(0);
         }
@@ -198,18 +198,18 @@ public class GeneralPreferencesController extends PreferencesDetailController {
         });
     }
 
-    private static Server getBlockExplorer(String serverUrl) {
+    private static BlockExplorer getBlockExplorer(String serverUrl) {
         String url = serverUrl.trim();
         if(url.endsWith("/")) {
             url = url.substring(0, url.length() - 1);
         }
-        return new Server(url);
+        return BlockExplorer.from(url);
     }
 
     private ObservableList<Server> getBlockExplorerList() {
         List<Server> servers = Arrays.stream(BlockExplorer.values()).map(BlockExplorer::getServer).collect(Collectors.toList());
         if(Config.get().getBlockExplorer() != null && !servers.contains(Config.get().getBlockExplorer())) {
-            servers.add(Config.get().getBlockExplorer());
+            servers.add(Config.get().getBlockExplorer().getServer());
         }
         servers.add(CUSTOM_BLOCK_EXPLORER);
         return FXCollections.observableList(servers);

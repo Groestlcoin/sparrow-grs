@@ -30,7 +30,7 @@ public class Config {
     private Mode mode;
     private BitcoinUnit bitcoinUnit;
     private UnitFormat unitFormat;
-    private Server blockExplorer;
+    private BlockExplorer blockExplorer;
     private FeeRatesSource feeRatesSource;
     private FeeRatesSelection feeRatesSelection;
     private OptimizationStrategy sendOptimizationStrategy;
@@ -157,11 +157,11 @@ public class Config {
         return BlockExplorer.NONE.getServer().equals(blockExplorer);
     }
 
-    public Server getBlockExplorer() {
+    public BlockExplorer getBlockExplorer() {
         return blockExplorer;
     }
 
-    public void setBlockExplorer(Server blockExplorer) {
+    public void setBlockExplorer(BlockExplorer blockExplorer) {
         this.blockExplorer = blockExplorer;
         flush();
     }
