@@ -477,7 +477,7 @@ public class AppController implements Initializable {
     public void submitBugReport(ActionEvent event) {
         ButtonType supportType = new ButtonType("Get Support", ButtonBar.ButtonData.LEFT);
         ButtonType bugType = new ButtonType("Submit Bug Report", ButtonBar.ButtonData.YES);
-        Optional<ButtonType> optResponse = showWarningDialog("Submit Bug Report", "Please note that this facility is for bug reports and feature requests only. There is a community of Sparrow users who can assist with support requests.", supportType, bugType);
+        Optional<ButtonType> optResponse = showWarningDialog("Submit Bug Report", "Please note that this facility is for bug reports and feature requests only. There is a community of Sparrow-GRS users who can assist with support requests.", supportType, bugType);
 
         if(optResponse.isPresent()) {
             if(optResponse.get() == bugType) {
