@@ -3,8 +3,9 @@ package com.sparrowwallet.sparrow.net;
 import com.sparrowwallet.sparrow.io.Server;
 
 public enum BlockExplorer {
-    MEMPOOL_SPACE("https://mempool.space"),
-    BLOCKSTREAM_INFO("https://blockstream.info"),
+    BLOCKSTREAM_INFO("https://esplora.groestlcoin.org"),
+    GROESTLSIGHT("https://groestlsight.groestlcoin.org"),
+    BLOCKBOOK("https://blockbook.groestlcoin.org"),
     NONE("http://none");
 
     private final Server server;
