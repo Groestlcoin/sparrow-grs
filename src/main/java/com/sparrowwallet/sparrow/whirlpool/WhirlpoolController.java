@@ -142,7 +142,7 @@ public class WhirlpoolController {
             tx0Previews = null;
             tx0PreviewProperty.set(null);
             Tx0FeeTarget tx0FeeTarget = FEE_TARGETS.get(newValue.intValue());
-            premixFeeRate.setText(getFeeRate(tx0FeeTarget) + " sats/vB");
+            premixFeeRate.setText(getFeeRate(tx0FeeTarget) + " gros/vB");
             lowPremixFeeRate.setVisible(tx0FeeTarget == Tx0FeeTarget.MIN && getFeeRate(tx0FeeTarget) * 2 < getFeeRate(Tx0FeeTarget.BLOCKS_4));
         });
         premixPriority.setValue(1);

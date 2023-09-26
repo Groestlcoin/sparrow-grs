@@ -72,7 +72,7 @@ public class CoinLabel extends Label {
 
     private class CoinContextMenu extends ContextMenu {
         public CoinContextMenu() {
-            MenuItem copySatsValue = new MenuItem("Copy Value in sats");
+            MenuItem copySatsValue = new MenuItem("Copy Value in gros");
             copySatsValue.setOnAction(AE -> {
                 hide();
                 ClipboardContent content = new ClipboardContent();

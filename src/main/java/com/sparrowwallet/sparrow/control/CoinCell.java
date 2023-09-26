@@ -173,7 +173,7 @@ class CoinCell extends TreeTableCell<Entry, Number> implements ConfirmationsList
             this.amount = amount;
             getItems().clear();
 
-            MenuItem copySatsValue = new MenuItem("Copy Value in sats");
+            MenuItem copySatsValue = new MenuItem("Copy Value in gros");
             copySatsValue.setOnAction(AE -> {
                 hide();
                 ClipboardContent content = new ClipboardContent();
@@ -181,7 +181,7 @@ class CoinCell extends TreeTableCell<Entry, Number> implements ConfirmationsList
                 Clipboard.getSystemClipboard().setContent(content);
             });
 
-            MenuItem copyBtcValue = new MenuItem("Copy Value in BTC");
+            MenuItem copyBtcValue = new MenuItem("Copy Value in GRS");
             copyBtcValue.setOnAction(AE -> {
                 hide();
                 ClipboardContent content = new ClipboardContent();

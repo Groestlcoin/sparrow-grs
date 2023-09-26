@@ -364,7 +364,7 @@ public class PrivateKeySweepDialog extends Dialog<Transaction> {
             fee = (long)Math.ceil(noFeeTransaction.getVirtualSize() * feeRate) + 1;
 
             if(total - fee <= dustThreshold) {
-                AppServices.showErrorDialog("Insufficient funds", "The unspent outputs for this private key contain insufficient funds to spend (" + total + " sats).");
+                AppServices.showErrorDialog("Insufficient funds", "The unspent outputs for this private key contain insufficient funds to spend (" + total + " gros).");
                 return;
             }
         }

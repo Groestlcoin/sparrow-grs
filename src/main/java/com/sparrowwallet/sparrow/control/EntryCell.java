@@ -471,7 +471,7 @@ public class EntryCell extends TreeTableCell<Entry, Entry> implements Confirmati
             }
 
             if(feeRate != null) {
-                tooltip += "\nFee rate: " + String.format("%.2f", feeRate) + " sats/vB";
+                tooltip += "\nFee rate: " + String.format("%.2f", feeRate) + " gros/vB";
             }
 
             tooltip += "\nRBF: " + (canRBF(transactionEntry.getBlockTransaction()) ? "Enabled" : "Disabled");

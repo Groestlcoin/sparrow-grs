@@ -858,7 +858,7 @@ public class SendController extends WalletFormController implements Initializabl
     /**
      * This method retrieves the fee rate used as input to constructing the transaction.
      * Where the user has set a custom fee amount, using the slider fee rate can mean the UTXO selectors underestimate the UTXO effective values and fail to find a solution
-     * In this case, use a fee rate of 1 sat/VB for maximum flexibility
+     * In this case, use a fee rate of 1 gro/VB for maximum flexibility
      *
      * @return the fee rate to use when constructing a transaction
      */
@@ -903,7 +903,7 @@ public class SendController extends WalletFormController implements Initializabl
             long thisFee = walletTransaction.getFee();
             double thisSize = walletTransaction.getTransaction().getVirtualSize();
             double effectiveRate = (utxoTxFee + thisFee) / (utxoTxSize + thisSize);
-            Tooltip tooltip = new Tooltip("Child Pays For Parent\n" + String.format("%.2f", effectiveRate) + " sats/vB effective rate");
+            Tooltip tooltip = new Tooltip("Child Pays For Parent\n" + String.format("%.2f", effectiveRate) + " gros/vB effective rate");
             cpfpFeeRate.setTooltip(tooltip);
             cpfpFeeRate.setVisible(true);
         } else {
