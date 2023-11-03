@@ -73,7 +73,7 @@ public class MixDialog extends WalletDialog {
 
         premixPriority.addListener((selectedIndex, previousSelection, changedByUserInteraction) -> {
             FeePriority feePriority = premixPriority.getItem(selectedIndex);
-            premixFeeRate.setText(SparrowMinerFeeSupplier.getFee(Integer.parseInt(feePriority.getTx0FeeTarget().getFeeTarget().getValue())) + " sats/vB");
+            premixFeeRate.setText(SparrowMinerFeeSupplier.getFee(Integer.parseInt(feePriority.getTx0FeeTarget().getFeeTarget().getValue())) + " gros/vB");
         });
         premixPriority.setSelectedIndex(1);
 

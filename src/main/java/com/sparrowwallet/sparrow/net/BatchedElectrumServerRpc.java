@@ -4,6 +4,7 @@ import com.github.arteam.simplejsonrpc.client.JsonRpcClient;
 import com.github.arteam.simplejsonrpc.client.Transport;
 import com.github.arteam.simplejsonrpc.client.exception.JsonRpcBatchException;
 import com.github.arteam.simplejsonrpc.client.exception.JsonRpcException;
+import com.github.arteam.simplejsonrpc.core.domain.ErrorMessage;
 import com.sparrowwallet.drongo.protocol.Sha256Hash;
 import com.sparrowwallet.drongo.wallet.Wallet;
 import com.sparrowwallet.sparrow.EventManager;
@@ -11,7 +12,7 @@ import com.sparrowwallet.sparrow.event.WalletHistoryStatusEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.math.BigInteger;
+import java.math.BigDecimal;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
@@ -227,23 +228,23 @@ public class BatchedElectrumServerRpc implements ElectrumServerRpc {
         try {
             return batchRequest.execute();
         } catch(JsonRpcBatchException e) {
-            throw new ElectrumServerRpcException("Error getting fee estimates", e);
+            throw new ElectrumServerRpcException("Error getting fee estimates: " + e.getErrors(), e);
         } catch(Exception e) {
             throw new ElectrumServerRpcException("Error getting fee estimates for target blocks: " + targetBlocks, e);
         }
     }
 
     @Override
-    public Map<Long, Long> getFeeRateHistogram(Transport transport) {
+    public Map<Double, Long> getFeeRateHistogram(Transport transport) {
         try {
             JsonRpcClient client = new JsonRpcClient(transport);
-            BigInteger[][] feesArray = new RetryLogic<BigInteger[][]>(DEFAULT_MAX_ATTEMPTS, RETRY_DELAY_SECS, IllegalStateException.class).getResult(() ->
-                    client.createRequest().returnAs(BigInteger[][].class).method("mempool.get_fee_histogram").id(idCounter.incrementAndGet()).execute());
+            BigDecimal[][] feesArray = new RetryLogic<BigDecimal[][]>(DEFAULT_MAX_ATTEMPTS, RETRY_DELAY_SECS, IllegalStateException.class).getResult(() ->
+                    client.createRequest().returnAs(BigDecimal[][].class).method("mempool.get_fee_histogram").id(idCounter.incrementAndGet()).execute());
 
-            Map<Long, Long> feeRateHistogram = new TreeMap<>();
-            for(BigInteger[] feePair : feesArray) {
+            Map<Double, Long> feeRateHistogram = new TreeMap<>();
+            for(BigDecimal[] feePair : feesArray) {
                 if(feePair[0].longValue() > 0) {
-                    feeRateHistogram.put(feePair[0].longValue(), feePair[1].longValue());
+                    feeRateHistogram.put(feePair[0].doubleValue(), feePair[1].longValue());
                 }
             }
 

@@ -1,5 +1,7 @@
 package com.sparrowwallet.sparrow.control;
 
+import com.sparrowwallet.drongo.KeyDerivation;
+import com.sparrowwallet.drongo.wallet.Wallet;
 import com.sparrowwallet.sparrow.AppServices;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
@@ -106,13 +108,17 @@ public class TitledDescriptionPane extends TitledPane {
 
     protected void setDescription(String text) {
         descriptionLabel.getStyleClass().remove("description-error");
-        descriptionLabel.getStyleClass().add("description-label");
+        if(!descriptionLabel.getStyleClass().contains("description-label")) {
+            descriptionLabel.getStyleClass().add("description-label");
+        }
         descriptionLabel.setText(text);
     }
 
     protected void setError(String title, String detail) {
         descriptionLabel.getStyleClass().remove("description-label");
-        descriptionLabel.getStyleClass().add("description-error");
+        if(!descriptionLabel.getStyleClass().contains("description-error")) {
+            descriptionLabel.getStyleClass().add("description-error");
+        }
         descriptionLabel.setText(title);
         if(detail != null && !detail.isEmpty()) {
             setContent(getContentBox(detail));
@@ -158,5 +164,18 @@ public class TitledDescriptionPane extends TitledPane {
                 removeArrow(count+1);
             }
         });
+    }
+
+    protected static int getAccount(Wallet wallet, KeyDerivation requiredDerivation) {
+        if(wallet == null || requiredDerivation == null) {
+            return 0;
+        }
+
+        int account = wallet.getScriptType().getAccount(requiredDerivation.getDerivationPath());
+        if(account < 0) {
+            account = 0;
+        }
+
+        return account;
     }
 }

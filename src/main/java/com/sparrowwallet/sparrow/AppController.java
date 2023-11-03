@@ -167,6 +167,9 @@ public class AppController implements Initializable {
     private MenuItem lockAllWallets;
 
     @FXML
+    private MenuItem showWalletSummary;
+
+    @FXML
     private MenuItem searchWallet;
 
     @FXML
@@ -210,6 +213,8 @@ public class AppController implements Initializable {
 
     private Timeline statusTimeline;
 
+    private SendToManyDialog sendToManyDialog;
+
     private Tab previouslySelectedTab;
 
     private boolean subTabsVisible;
@@ -217,6 +222,8 @@ public class AppController implements Initializable {
     private final Set<Wallet> loadingWallets = new LinkedHashSet<>();
 
     private final Set<Wallet> emptyLoadingWallets = new LinkedHashSet<>();
+
+    private final Map<File, File> renamedWallets = new HashMap<>();
 
     private final ChangeListener<Boolean> serverToggleOnlineListener = (observable, oldValue, newValue) -> {
         Platform.runLater(() -> setServerToggleTooltip(getCurrentBlockHeight()));
@@ -328,6 +335,9 @@ public class AppController implements Initializable {
         final BitcoinUnit selectedUnit = unit;
         Optional<Toggle> selectedUnitToggle = bitcoinUnit.getToggles().stream().filter(toggle -> selectedUnit.equals(toggle.getUserData())).findFirst();
         selectedUnitToggle.ifPresent(toggle -> bitcoinUnit.selectToggle(toggle));
+        Optional<Toggle> otherUnitToggle = bitcoinUnit.getToggles().stream().filter(toggle ->
+                (List.of(BitcoinUnit.AUTO, BitcoinUnit.SATOSHIS).contains(selectedUnit) && BitcoinUnit.BTC.equals(toggle.getUserData()) || (selectedUnit == BitcoinUnit.BTC && BitcoinUnit.SATOSHIS.equals(toggle.getUserData())))).findFirst();
+        otherUnitToggle.ifPresent(toggle -> ((RadioMenuItem)toggle).setAccelerator(new KeyCodeCombination(KeyCode.B, KeyCombination.SHORTCUT_DOWN)));
 
         UnitFormat format = Config.get().getUnitFormat();
         if(format == null) {
@@ -373,6 +383,7 @@ public class AppController implements Initializable {
         deleteWallet.disableProperty().bind(exportWallet.disableProperty());
         closeTab.setDisable(true);
         lockWallet.setDisable(true);
+        showWalletSummary.disableProperty().bind(exportWallet.disableProperty());
         searchWallet.disableProperty().bind(exportWallet.disableProperty());
         refreshWallet.disableProperty().bind(Bindings.or(exportWallet.disableProperty(), Bindings.or(serverToggle.disableProperty(), AppServices.onlineProperty().not())));
         sendToMany.disableProperty().bind(exportWallet.disableProperty());
@@ -386,7 +397,7 @@ public class AppController implements Initializable {
         configureSwitchServer();
         setServerType(Config.get().getServerType());
         serverToggle.setSelected(isConnected());
-        serverToggle.setDisable(Config.get().getServerType() == null);
+        serverToggle.setDisable(!Config.get().hasServer());
         onlineProperty().bindBidirectional(serverToggle.selectedProperty());
         onlineProperty().addListener(new WeakChangeListener<>(serverToggleOnlineListener));
         serverToggle.addEventHandler(MouseEvent.MOUSE_CLICKED, event -> {
@@ -464,7 +475,17 @@ public class AppController implements Initializable {
     }
 
     public void submitBugReport(ActionEvent event) {
-        AppServices.get().getApplication().getHostServices().showDocument("https://github.com/Groestlcoin/sparrow-grs/issues");
+        ButtonType supportType = new ButtonType("Get Support", ButtonBar.ButtonData.LEFT);
+        ButtonType bugType = new ButtonType("Submit Bug Report", ButtonBar.ButtonData.YES);
+        Optional<ButtonType> optResponse = showWarningDialog("Submit Bug Report", "Please note that this facility is for bug reports and feature requests only. There is a community of Sparrow-GRS users who can assist with support requests.", supportType, bugType);
+
+        if(optResponse.isPresent()) {
+            if(optResponse.get() == bugType) {
+                AppServices.get().getApplication().getHostServices().showDocument("https://github.com/Groestlcoin/sparrow-grs/issues");
+            } else {
+                openSupport(event);
+            }
+        }
     }
 
     public void showAbout(ActionEvent event) {
@@ -753,7 +774,7 @@ public class AppController implements Initializable {
                         writer.print(transactionTabData.getPsbt().toBase64String(includeXpubs));
                         writer.flush();
                     } else {
-                        outputStream.write(transactionTabData.getPsbt().serialize(includeXpubs));
+                        outputStream.write(transactionTabData.getPsbt().serialize(includeXpubs, true));
                     }
                 } catch(IOException e) {
                     log.error("Error saving PSBT", e);
@@ -834,6 +855,10 @@ public class AppController implements Initializable {
                 }
             }
         }
+    }
+
+    public void renameWallet(ActionEvent event) {
+        renameWallet(getSelectedWalletForm());
     }
 
     public void deleteWallet(ActionEvent event) {
@@ -1068,11 +1093,25 @@ public class AppController implements Initializable {
     }
 
     public void importWallet(ActionEvent event) {
-        WalletImportDialog dlg = new WalletImportDialog();
+        List<WalletForm> selectedWalletForms = getSelectedWalletForms();
+        WalletImportDialog dlg = new WalletImportDialog(selectedWalletForms);
         Optional<Wallet> optionalWallet = dlg.showAndWait();
         if(optionalWallet.isPresent()) {
             Wallet wallet = optionalWallet.get();
-            addImportedWallet(wallet);
+
+            List<WalletTabData> walletTabData = getOpenWalletTabData();
+            List<ExtendedKey> xpubs = wallet.getKeystores().stream().map(Keystore::getExtendedPublicKey).collect(Collectors.toList());
+            Optional<WalletForm> optNewWalletForm = walletTabData.stream()
+                    .map(WalletTabData::getWalletForm)
+                    .filter(wf -> wf.getSettingsWalletForm() != null && wf.getSettingsWalletForm().getWallet().getPolicyType() == PolicyType.MULTI &&
+                            wf.getSettingsWalletForm().getWallet().getScriptType() == wallet.getScriptType() && !wf.getSettingsWalletForm().getWallet().isValid() &&
+                            wf.getSettingsWalletForm().getWallet().getKeystores().stream().map(Keystore::getExtendedPublicKey).anyMatch(xpubs::contains)).findFirst();
+            if(optNewWalletForm.isPresent()) {
+                EventManager.get().post(new ExistingWalletImportedEvent(optNewWalletForm.get().getWalletId(), wallet));
+                selectTab(optNewWalletForm.get().getWallet());
+            } else if(selectedWalletForms.isEmpty() || wallet != selectedWalletForms.get(0).getWallet()) {
+                addImportedWallet(wallet);
+            }
         }
     }
 
@@ -1114,7 +1153,7 @@ public class AppController implements Initializable {
     }
 
     private void addImportedWallet(Wallet wallet) {
-        WalletNameDialog nameDlg = new WalletNameDialog(wallet.getName());
+        WalletNameDialog nameDlg = new WalletNameDialog(wallet.getName(), true, wallet.getBirthDate());
         Optional<WalletNameDialog.NameAndBirthDate> optNameAndBirthDate = nameDlg.showAndWait();
         if(optNameAndBirthDate.isPresent()) {
             WalletNameDialog.NameAndBirthDate nameAndBirthDate = optNameAndBirthDate.get();
@@ -1245,6 +1284,7 @@ public class AppController implements Initializable {
         PreferencesDialog preferencesDialog = new PreferencesDialog(preferenceGroup);
         preferencesDialog.showAndWait();
         configureSwitchServer();
+        serverToggle.setDisable(!Config.get().hasServer());
     }
 
     public void signVerifyMessage(ActionEvent event) {
@@ -1268,6 +1308,13 @@ public class AppController implements Initializable {
     }
 
     public void sendToMany(ActionEvent event) {
+        if(sendToManyDialog != null) {
+            Stage stage = (Stage)sendToManyDialog.getDialogPane().getScene().getWindow();
+            stage.setAlwaysOnTop(true);
+            stage.setAlwaysOnTop(false);
+            return;
+        }
+
         WalletForm selectedWalletForm = getSelectedWalletForm();
         if(selectedWalletForm != null) {
             Wallet wallet = selectedWalletForm.getWallet();
@@ -1276,11 +1323,13 @@ public class AppController implements Initializable {
                 bitcoinUnit = wallet.getAutoUnit();
             }
 
-            SendToManyDialog sendToManyDialog = new SendToManyDialog(bitcoinUnit);
+            sendToManyDialog = new SendToManyDialog(bitcoinUnit);
+            sendToManyDialog.initModality(Modality.NONE);
             Optional<List<Payment>> optPayments = sendToManyDialog.showAndWait();
+            sendToManyDialog = null;
             optPayments.ifPresent(payments -> {
                 if(!payments.isEmpty()) {
-                    EventManager.get().post(new SendActionEvent(wallet, new ArrayList<>(wallet.getWalletUtxos().keySet())));
+                    EventManager.get().post(new SendActionEvent(wallet, new ArrayList<>(wallet.getSpendableUtxos().keySet())));
                     Platform.runLater(() -> EventManager.get().post(new SendPaymentsEvent(wallet, payments)));
                 }
             });
@@ -1424,6 +1473,21 @@ public class AppController implements Initializable {
         }
     }
 
+    public void showWalletSummary(ActionEvent event) {
+        Tab selectedTab = tabs.getSelectionModel().getSelectedItem();
+        if(selectedTab != null) {
+            TabData tabData = (TabData) selectedTab.getUserData();
+            if(tabData instanceof WalletTabData) {
+                TabPane subTabs = (TabPane) selectedTab.getContent();
+                List<WalletForm> walletForms = subTabs.getTabs().stream().map(subTab -> ((WalletTabData)subTab.getUserData()).getWalletForm()).collect(Collectors.toList());
+                if(!walletForms.isEmpty()) {
+                    WalletSummaryDialog walletSummaryDialog = new WalletSummaryDialog(walletForms);
+                    walletSummaryDialog.showAndWait();
+                }
+            }
+        }
+    }
+
     public void refreshWallet(ActionEvent event) {
         WalletForm selectedWalletForm = getSelectedWalletForm();
         if(selectedWalletForm != null) {
@@ -1509,6 +1573,11 @@ public class AppController implements Initializable {
 
             tabs.getTabs().add(tab);
             tabs.getSelectionModel().select(tab);
+
+            File oldWalletFile = renamedWallets.remove(storage.getWalletFile());
+            if(oldWalletFile != null) {
+                deleteStorage(new Storage(oldWalletFile), false);
+            }
         } else {
             for(Tab walletTab : tabs.getTabs()) {
                 TabData tabData = (TabData)walletTab.getUserData();
@@ -1585,6 +1654,9 @@ public class AppController implements Initializable {
             subTabLabel.setGraphic(getSubTabGlyph(wallet));
             subTabLabel.setContentDisplay(ContentDisplay.TOP);
             subTabLabel.setAlignment(Pos.TOP_CENTER);
+            if(TextUtils.computeTextWidth(subTabLabel.getFont(), label, 0.0D) > (90-6)) {
+                subTabLabel.setTooltip(new Tooltip(label));
+            }
             subTab.setGraphic(subTabLabel);
             FXMLLoader walletLoader = new FXMLLoader(getClass().getResource("wallet/wallet.fxml"));
             subTab.setContent(walletLoader.load());
@@ -1651,6 +1723,19 @@ public class AppController implements Initializable {
         }
 
         return null;
+    }
+
+    public List<WalletForm> getSelectedWalletForms() {
+        Tab selectedTab = tabs.getSelectionModel().getSelectedItem();
+        if(selectedTab != null) {
+            TabData tabData = (TabData) selectedTab.getUserData();
+            if(tabData instanceof WalletTabData) {
+                TabPane subTabs = (TabPane) selectedTab.getContent();
+                return subTabs.getTabs().stream().map(subTab -> ((WalletTabData) subTab.getUserData()).getWalletForm()).collect(Collectors.toList());
+            }
+        }
+
+        return Collections.emptyList();
     }
 
     private void addTransactionTab(String name, File file, String string) throws ParseException, PSBTParseException, TransactionParseException {
@@ -1825,6 +1910,7 @@ public class AppController implements Initializable {
             tabs.getTabs().add(index + 1, tab);
             tabs.getTabs().addListener(tabsChangeListener);
             tabs.getSelectionModel().select(tab);
+            EventManager.get().post(new RequestOpenWalletsEvent());   //Rearrange recent files list
         });
         MenuItem moveLeft = new MenuItem("Move Left");
         moveLeft.setOnAction(event -> {
@@ -1834,6 +1920,7 @@ public class AppController implements Initializable {
             tabs.getTabs().add(index - 1, tab);
             tabs.getTabs().addListener(tabsChangeListener);
             tabs.getSelectionModel().select(tab);
+            EventManager.get().post(new RequestOpenWalletsEvent());   //Rearrange recent files list
         });
         contextMenu.getItems().addAll(moveRight, moveLeft);
 
@@ -1916,6 +2003,30 @@ public class AppController implements Initializable {
         }
     }
 
+    private void renameWallet(WalletForm selectedWalletForm) {
+        WalletNameDialog walletNameDialog = new WalletNameDialog(selectedWalletForm.getMasterWallet().getName(), false, null, true);
+        Optional<WalletNameDialog.NameAndBirthDate> optName = walletNameDialog.showAndWait();
+        if(optName.isPresent()) {
+            File walletFile = Storage.getWalletFile(optName.get().getName() + "." + PersistenceType.DB.getExtension());
+            if(walletFile.exists()) {
+                showErrorDialog("Error renaming wallet", "Wallet file " + walletFile.getAbsolutePath() + " already exists.");
+                return;
+            }
+
+            Storage.CopyWalletService copyWalletService = new Storage.CopyWalletService(selectedWalletForm.getWallet(), walletFile);
+            copyWalletService.setOnSucceeded(event -> {
+                renamedWallets.put(walletFile, selectedWalletForm.getStorage().getWalletFile());
+                tabs.getTabs().remove(tabs.getSelectionModel().getSelectedItem());
+                openWalletFile(walletFile, true);
+            });
+            copyWalletService.setOnFailed(event -> {
+                log.error("Error renaming wallet", event.getSource().getException());
+                showErrorDialog("Error renaming wallet", event.getSource().getException().getMessage());
+            });
+            copyWalletService.start();
+        }
+    }
+
     private void deleteWallet(WalletForm selectedWalletForm) {
         Optional<ButtonType> optButtonType = AppServices.showWarningDialog("Delete " + selectedWalletForm.getWallet().getMasterName() + "?", "The wallet file and any backups will be deleted. Are you sure?", ButtonType.NO, ButtonType.YES);
         if(optButtonType.isPresent() && optButtonType.get() == ButtonType.YES) {
@@ -1931,7 +2042,7 @@ public class AppController implements Initializable {
 
                         try {
                             tabs.getTabs().remove(tabs.getSelectionModel().getSelectedItem());
-                            deleteStorage(storage);
+                            deleteStorage(storage, true);
                         } finally {
                             encryptionFullKey.clear();
                             password.get().clear();
@@ -1953,15 +2064,15 @@ public class AppController implements Initializable {
                 }
             } else {
                 tabs.getTabs().remove(tabs.getSelectionModel().getSelectedItem());
-                deleteStorage(storage);
+                deleteStorage(storage, true);
             }
         }
     }
 
-    private void deleteStorage(Storage storage) {
+    private void deleteStorage(Storage storage, boolean deleteBackups) {
         if(storage.isClosed()) {
             Platform.runLater(() -> {
-                Storage.DeleteWalletService deleteWalletService = new Storage.DeleteWalletService(storage);
+                Storage.DeleteWalletService deleteWalletService = new Storage.DeleteWalletService(storage, deleteBackups);
                 deleteWalletService.setDelay(Duration.seconds(3));
                 deleteWalletService.setPeriod(Duration.hours(1));
                 deleteWalletService.setOnSucceeded(event -> {
@@ -1977,7 +2088,7 @@ public class AppController implements Initializable {
                 deleteWalletService.start();
             });
         } else {
-            Platform.runLater(() -> deleteStorage(storage));
+            Platform.runLater(() -> deleteStorage(storage, deleteBackups));
         }
     }
 
@@ -2075,7 +2186,7 @@ public class AppController implements Initializable {
             serverToggle.getStyleClass().remove("core-server");
         }
 
-        serverToggle.setDisable(false);
+        serverToggle.setDisable(!Config.get().hasServer());
     }
 
     public void setTheme(ActionEvent event) {
@@ -2769,6 +2880,14 @@ public class AppController implements Initializable {
     public void bitcoinUnitChanged(BitcoinUnitChangedEvent event) {
         Optional<Toggle> selectedToggle = bitcoinUnit.getToggles().stream().filter(toggle -> event.getBitcoinUnit().equals(toggle.getUserData())).findFirst();
         selectedToggle.ifPresent(toggle -> bitcoinUnit.selectToggle(toggle));
+        bitcoinUnit.getToggles().forEach(toggle -> {
+            RadioMenuItem menuItem = (RadioMenuItem)toggle;
+            if(List.of(BitcoinUnit.AUTO, BitcoinUnit.SATOSHIS).contains(event.getBitcoinUnit()) && BitcoinUnit.BTC.equals(toggle.getUserData()) || (event.getBitcoinUnit() == BitcoinUnit.BTC && BitcoinUnit.SATOSHIS.equals(toggle.getUserData()))) {
+                menuItem.setAccelerator(new KeyCodeCombination(KeyCode.B, KeyCombination.SHORTCUT_DOWN));
+            } else {
+                menuItem.setAccelerator(null);
+            }
+        });
     }
 
     @Subscribe

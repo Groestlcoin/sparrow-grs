@@ -41,6 +41,7 @@ public class WalletForm {
 
     private final PublishSubject<WalletNode> refreshNodesSubject;
 
+    private WalletForm settingsWalletForm;
     private final List<WalletForm> nestedWalletForms = new ArrayList<>();
 
     private WalletTransactionsEntry walletTransactionsEntry;
@@ -94,6 +95,14 @@ public class WalletForm {
 
     public void setWallet(Wallet wallet) {
         throw new UnsupportedOperationException("Only SettingsWalletForm supports setWallet");
+    }
+
+    public WalletForm getSettingsWalletForm() {
+        return settingsWalletForm;
+    }
+
+    void setSettingsWalletForm(WalletForm settingsWalletForm) {
+        this.settingsWalletForm = settingsWalletForm;
     }
 
     public List<WalletForm> getNestedWalletForms() {
@@ -189,6 +198,7 @@ public class WalletForm {
                         if(!storage.isPersisted(addedWallet)) {
                             try {
                                 storage.saveWallet(addedWallet);
+                                EventManager.get().post(new NewChildWalletSavedEvent(storage, wallet, addedWallet));
                             } catch(Exception e) {
                                 log.error("Error saving wallet", e);
                                 AppServices.showErrorDialog("Error saving wallet " + addedWallet.getName(), e.getMessage());
@@ -488,7 +498,8 @@ public class WalletForm {
     public void walletLabelsChanged(WalletEntryLabelsChangedEvent event) {
         if(event.toThisOrNested(wallet)) {
             Map<Entry, Entry> labelChangedEntries = new LinkedHashMap<>();
-            for(Entry entry : event.getEntries()) {
+            Collection<Entry> entries = event.propagate() ? event.getEntries() : Collections.emptyList();
+            for(Entry entry : entries) {
                 if(entry.getLabel() != null && !entry.getLabel().isEmpty()) {
                     if(entry instanceof TransactionEntry transactionEntry) {
                         for(KeyPurpose keyPurpose : KeyPurpose.DEFAULT_PURPOSES) {
@@ -593,7 +604,9 @@ public class WalletForm {
                 Optional<WalletNode> optPurposeNode = wallet.getPurposeNodes().stream().filter(node -> node.getKeyPurpose() == keyPurpose).findFirst();
                 if(optPurposeNode.isPresent()) {
                     WalletNode purposeNode = optPurposeNode.get();
-                    newNodes.addAll(purposeNode.fillToIndex(wallet, wallet.getLookAheadIndex(purposeNode)));
+                    purposeNode.fillToIndex(wallet, wallet.getLookAheadIndex(purposeNode));
+                    int previousLookAheadIndex = event.getPreviousLookAheadIndex(purposeNode);
+                    newNodes.addAll(purposeNode.getChildren().stream().filter(node -> node.getIndex() > previousLookAheadIndex).collect(Collectors.toList()));
                 }
             }
 

@@ -146,6 +146,9 @@ public class Bwt {
         Config config = Config.get();
         if(config.getCoreServer() != null) {
             bwtConfig.bitcoindUrl = config.getCoreServer().getUrl();
+            if(!config.getCoreServer().getHostAndPort().hasPort()) {
+                bwtConfig.bitcoindUrl = config.getCoreServer().getUrl() + ":" + Network.get().getDefaultPort();
+            }
             try {
                 Protocol protocol = config.getCoreServer().getProtocol();
                 HostAndPort hostAndPort = protocol.getServerHostAndPort(bwtConfig.bitcoindUrl);
@@ -181,7 +184,7 @@ public class Bwt {
 
     private HostAndPort getTorProxy() {
         return AppServices.isTorRunning() ?
-                HostAndPort.fromParts("127.0.0.1", TorService.PROXY_PORT) :
+                Tor.getDefault().getProxyHostAndPort() :
                 (Config.get().getProxyServer() == null || Config.get().getProxyServer().isEmpty() || !Config.get().isUseProxy() ? null : HostAndPort.fromString(Config.get().getProxyServer().replace("localhost", "127.0.0.1")));
     }
 
@@ -361,7 +364,7 @@ public class Bwt {
                         Bwt.this.start(notifier);
                     } else {
                         if(AppServices.get().getOpenWallets().keySet().stream().anyMatch(wallet -> wallet.getScriptType() == ScriptType.P2TR)) {
-                            throw new IllegalStateException("Taproot wallets are not yet supported when connecting to Groestlcoin Core");
+                            throw new IllegalStateException("Upgrade Groestlcoin Core to v24 or later for Taproot wallet support");
                         }
 
                         Bwt.this.start(AppServices.get().getOpenWallets().keySet(), notifier);

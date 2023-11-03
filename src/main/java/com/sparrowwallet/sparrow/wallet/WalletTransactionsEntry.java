@@ -1,5 +1,6 @@
 package com.sparrowwallet.sparrow.wallet;
 
+import com.google.common.collect.Sets;
 import com.sparrowwallet.drongo.KeyPurpose;
 import com.sparrowwallet.drongo.protocol.HashIndex;
 import com.sparrowwallet.drongo.wallet.BlockTransaction;
@@ -15,13 +16,18 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.*;
+import java.util.function.BinaryOperator;
 import java.util.stream.Collectors;
 
 public class WalletTransactionsEntry extends Entry {
     private static final Logger log = LoggerFactory.getLogger(WalletTransactionsEntry.class);
 
     public WalletTransactionsEntry(Wallet wallet) {
-        super(wallet, wallet.getName(), getWalletTransactions(wallet).stream().map(WalletTransaction::getTransactionEntry).collect(Collectors.toList()));
+        this(wallet, false);
+    }
+
+    public WalletTransactionsEntry(Wallet wallet, boolean includeAllChildWallets) {
+        super(wallet, wallet.getDisplayName(), getWalletTransactions(wallet, includeAllChildWallets).stream().map(WalletTransaction::getTransactionEntry).collect(Collectors.toList()));
         calculateBalances(false); //No need to resort
     }
 
@@ -68,17 +74,17 @@ public class WalletTransactionsEntry extends Entry {
 
     public void updateTransactions() {
         Map<HashIndex, BlockTransactionHashIndex> walletTxos = getWallet().getWalletTxos().entrySet().stream()
-                .collect(Collectors.toUnmodifiableMap(entry -> new HashIndex(entry.getKey().getHash(), entry.getKey().getIndex()), Map.Entry::getKey));
+                .collect(Collectors.toUnmodifiableMap(entry -> new HashIndex(entry.getKey().getHash(), entry.getKey().getIndex()), Map.Entry::getKey,
+                        BinaryOperator.maxBy(BlockTransactionHashIndex::compareTo)));
 
-        List<Entry> current = getWalletTransactions(getWallet()).stream().map(WalletTransaction::getTransactionEntry).collect(Collectors.toList());
-        List<Entry> previous = new ArrayList<>(getChildren());
+        Collection<WalletTransactionsEntry.WalletTransaction> entries = getWalletTransactions(getWallet(), false);
+        Set<Entry> current = entries.stream().map(WalletTransaction::getTransactionEntry).collect(Collectors.toCollection(LinkedHashSet::new));
+        Set<Entry> previous = new LinkedHashSet<>(getChildren());
 
-        List<Entry> entriesAdded = new ArrayList<>(current);
-        entriesAdded.removeAll(previous);
+        Set<Entry> entriesAdded = Sets.difference(current, previous);
         getChildren().addAll(entriesAdded);
 
-        List<Entry> entriesRemoved = new ArrayList<>(previous);
-        entriesRemoved.removeAll(current);
+        Set<Entry> entriesRemoved = Sets.difference(previous, current);
         getChildren().removeAll(entriesRemoved);
 
         calculateBalances(true);
@@ -99,7 +105,7 @@ public class WalletTransactionsEntry extends Entry {
         }
     }
 
-    private static Collection<WalletTransaction> getWalletTransactions(Wallet wallet) {
+    private static Collection<WalletTransaction> getWalletTransactions(Wallet wallet, boolean includeAllChildWallets) {
         Map<BlockTransaction, WalletTransaction> walletTransactionMap = new HashMap<>(wallet.getTransactions().size());
 
         for(KeyPurpose keyPurpose : wallet.getWalletKeyPurposes()) {
@@ -107,7 +113,7 @@ public class WalletTransactionsEntry extends Entry {
         }
 
         for(Wallet childWallet : wallet.getChildWallets()) {
-            if(childWallet.isNested()) {
+            if(includeAllChildWallets || childWallet.isNested()) {
                 for(KeyPurpose keyPurpose : childWallet.getWalletKeyPurposes()) {
                     getWalletTransactions(childWallet, walletTransactionMap, childWallet.getNode(keyPurpose));
                 }
@@ -214,6 +220,14 @@ public class WalletTransactionsEntry extends Entry {
             };
         }
         return mempoolBalance;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof WalletTransactionsEntry)) return false;
+
+        return super.equals(o);
     }
 
     private static class WalletTransaction implements Comparable<WalletTransaction> {

@@ -129,7 +129,9 @@ public enum Protocol {
     public abstract CloseableTransport getTransport(HostAndPort server, File serverCert, HostAndPort proxy) throws IOException, CertificateException, NoSuchAlgorithmException, KeyStoreException, KeyManagementException;
 
     public HostAndPort getServerHostAndPort(String url) {
-        return HostAndPort.fromString(url.substring(this.toUrlString().length()));
+        String lessProtocol = url.substring(this.toUrlString().length());
+        int pathStart = lessProtocol.indexOf('/');
+        return HostAndPort.fromString(pathStart < 0 ? lessProtocol : lessProtocol.substring(0, pathStart));
     }
 
     public String toUrlString() {
@@ -149,7 +151,7 @@ public enum Protocol {
     }
 
     public static boolean isOnionHost(String host) {
-        return host != null && host.toLowerCase(Locale.ROOT).endsWith(TorService.TOR_ADDRESS_SUFFIX);
+        return host != null && host.toLowerCase(Locale.ROOT).endsWith(Tor.TOR_ADDRESS_SUFFIX);
     }
 
     public static boolean isOnionAddress(Server server) {

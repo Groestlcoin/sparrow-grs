@@ -92,7 +92,7 @@ public class MixPoolDialog extends WalletDialog {
             DisplayPool selectedPool = pool.getSelectedItem();
             if(selectedPool != NULL_POOL) {
                 UnitFormat format = Config.get().getUnitFormat() == null ? UnitFormat.DOT : Config.get().getUnitFormat();
-                poolFee.setText(format.formatSatsValue(selectedPool.pool.getFeeValue()) + " sats");
+                poolFee.setText(format.formatSatsValue(selectedPool.pool.getFeeValue()) + " gros");
                 fetchTx0Preview(selectedPool.pool);
             }
         });
@@ -110,7 +110,7 @@ public class MixPoolDialog extends WalletDialog {
                     }
 
                     UnitFormat format = Config.get().getUnitFormat() == null ? UnitFormat.DOT : Config.get().getUnitFormat();
-                    poolFee.setText(format.formatSatsValue(tx0Preview.getTx0Data().getFeeValue()) + " sats");
+                    poolFee.setText(format.formatSatsValue(tx0Preview.getTx0Data().getFeeValue()) + " gros");
                     premixOutputs.setText(tx0Preview.getNbPremix() + " UTXOs");
                     broadcast.setEnabled(true);
                 }
@@ -197,6 +197,7 @@ public class MixPoolDialog extends WalletDialog {
             tx0Previews = null;
             whirlpool.setScode(mixConfig.getScode());
             whirlpool.setTx0FeeTarget(tx0FeeTarget);
+            whirlpool.setMixFeeTarget(tx0FeeTarget);
 
             Whirlpool.Tx0PreviewsService tx0PreviewsService = new Whirlpool.Tx0PreviewsService(whirlpool, utxoEntries);
             tx0PreviewsService.setOnRunning(workerStateEvent -> {
@@ -234,7 +235,7 @@ public class MixPoolDialog extends WalletDialog {
             }
 
             UnitFormat format = Config.get().getUnitFormat() == null ? UnitFormat.DOT : Config.get().getUnitFormat();
-            return format.formatSatsValue(pool.getDenomination()) + " sats";
+            return format.formatSatsValue(pool.getDenomination()) + " gros";
         }
     }
 }

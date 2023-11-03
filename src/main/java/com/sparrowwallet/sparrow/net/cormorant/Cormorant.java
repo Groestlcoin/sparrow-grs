@@ -1,16 +1,21 @@
 package com.sparrowwallet.sparrow.net.cormorant;
 
 import com.google.common.eventbus.EventBus;
+import com.sparrowwallet.drongo.address.Address;
 import com.sparrowwallet.drongo.wallet.Wallet;
 import com.sparrowwallet.sparrow.AppServices;
 import com.sparrowwallet.sparrow.io.Server;
 import com.sparrowwallet.sparrow.net.Protocol;
+import com.sparrowwallet.sparrow.net.ServerException;
 import com.sparrowwallet.sparrow.net.cormorant.bitcoind.BitcoindClient;
 import com.sparrowwallet.sparrow.net.cormorant.bitcoind.CormorantBitcoindException;
 import com.sparrowwallet.sparrow.net.cormorant.bitcoind.ImportFailedException;
 import com.sparrowwallet.sparrow.net.cormorant.electrum.ElectrumServerRunnable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.Collections;
+import java.util.Date;
 
 public class Cormorant {
     private static final Logger log = LoggerFactory.getLogger(Cormorant.class);
@@ -22,15 +27,20 @@ public class Cormorant {
     private BitcoindClient bitcoindClient;
     private ElectrumServerRunnable electrumServer;
 
+    private final boolean useWallets;
     private boolean running;
 
+    public Cormorant(boolean useWallets) {
+        this.useWallets = useWallets;
+    }
+
     public Server start() throws CormorantBitcoindException {
-        bitcoindClient = new BitcoindClient();
+        bitcoindClient = new BitcoindClient(useWallets);
         bitcoindClient.initialize();
 
         Thread importThread = new Thread(() -> {
             try {
-                bitcoindClient.importWallets(AppServices.get().getOpenWallets().keySet());
+                bitcoindClient.importWallets(useWallets ? AppServices.get().getOpenWallets().keySet() : Collections.emptySet());
             } catch(ImportFailedException e) {
                 log.debug("Failed to import wallets", e);
             } finally {
@@ -57,8 +67,17 @@ public class Cormorant {
             bitcoindClient.importWallet(wallet);
             return true;
         } catch(ImportFailedException e) {
-            log.debug("Failed to import wallets", e);
+            log.warn("Failed to import wallets", e);
             return false;
+        }
+    }
+
+    public void checkAddressImport(Address address, Date since) throws ServerException {
+        //Will block until address descriptor has been added
+        try {
+            bitcoindClient.importAddress(address, since);
+        } catch(ImportFailedException e) {
+            throw new ServerException("Failed to import address", e);
         }
     }
 

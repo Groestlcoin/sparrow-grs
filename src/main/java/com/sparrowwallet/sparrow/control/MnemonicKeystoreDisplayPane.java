@@ -1,6 +1,5 @@
 package com.sparrowwallet.sparrow.control;
 
-import com.sparrowwallet.drongo.wallet.DeterministicSeed;
 import com.sparrowwallet.drongo.wallet.Keystore;
 import com.sparrowwallet.drongo.wallet.WalletModel;
 import javafx.beans.property.SimpleListProperty;
@@ -24,7 +23,8 @@ public class MnemonicKeystoreDisplayPane extends MnemonicKeystorePane {
         showWordList(keystore.getSeed());
     }
 
-    protected Node getMnemonicWordsEntry(int numWords) {
+    @Override
+    protected Node getMnemonicWordsEntry(int numWords, boolean showPassphrase, boolean editPassphrase) {
         VBox vBox = new VBox();
         vBox.setSpacing(10);
 

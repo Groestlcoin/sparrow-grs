@@ -9,7 +9,6 @@ import com.google.zxing.common.BitMatrix;
 import com.google.zxing.qrcode.QRCodeWriter;
 import com.sparrowwallet.drongo.KeyPurpose;
 import com.sparrowwallet.drongo.OutputDescriptor;
-import com.sparrowwallet.drongo.address.Address;
 import com.sparrowwallet.drongo.wallet.BlockTransactionHashIndex;
 import com.sparrowwallet.drongo.wallet.KeystoreSource;
 import com.sparrowwallet.drongo.wallet.Wallet;
@@ -27,7 +26,6 @@ import javafx.fxml.Initializable;
 import javafx.scene.control.*;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
-import javafx.stage.Stage;
 import org.controlsfx.glyphfont.Glyph;
 import org.fxmisc.richtext.CodeArea;
 import org.slf4j.Logger;
@@ -191,11 +189,25 @@ public class ReceiveController extends WalletFormController implements Initializ
 
     public void getNewAddress(ActionEvent event) {
         refreshAddress();
+        if(currentEntry != null) {
+            ensureSufficientGapLimit(currentEntry.getNode().getIndex());
+        }
     }
 
     public void refreshAddress() {
         NodeEntry freshEntry = getWalletForm().getFreshNodeEntry(KeyPurpose.RECEIVE, currentEntry);
         setNodeEntry(freshEntry);
+    }
+
+    private void ensureSufficientGapLimit(int index) {
+        Wallet wallet = getWalletForm().getWallet();
+        Integer highestIndex = wallet.getNode(KeyPurpose.RECEIVE).getHighestUsedIndex();
+        int highestUsedIndex = highestIndex == null ? -1 : highestIndex;
+        int existingGapLimit = wallet.getGapLimit();
+        if(index > highestUsedIndex + existingGapLimit) {
+            wallet.setGapLimit(Math.max(wallet.getGapLimit(), index - highestUsedIndex));
+            EventManager.get().post(new WalletGapLimitChangedEvent(getWalletForm().getWalletId(), wallet, existingGapLimit));
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -207,21 +219,21 @@ public class ReceiveController extends WalletFormController implements Initializ
             List<Device> possibleDevices = (List<Device>)displayAddress.getUserData();
             if(possibleDevices != null && !possibleDevices.isEmpty()) {
                 if(possibleDevices.size() > 1 || possibleDevices.get(0).isNeedsPinSent() || possibleDevices.get(0).isNeedsPassphraseSent()) {
-                    DeviceAddressDialog dlg = new DeviceAddressDialog(wallet, addressDescriptor);
+                    DeviceDisplayAddressDialog dlg = new DeviceDisplayAddressDialog(wallet, addressDescriptor);
                     dlg.showAndWait();
                 } else {
                     Device actualDevice = possibleDevices.get(0);
                     Hwi.DisplayAddressService displayAddressService = new Hwi.DisplayAddressService(actualDevice, "", wallet.getScriptType(), addressDescriptor);
                     displayAddressService.setOnFailed(failedEvent -> {
                         Platform.runLater(() -> {
-                            DeviceAddressDialog dlg = new DeviceAddressDialog(wallet, addressDescriptor);
+                            DeviceDisplayAddressDialog dlg = new DeviceDisplayAddressDialog(wallet, addressDescriptor);
                             dlg.showAndWait();
                         });
                     });
                     displayAddressService.start();
                 }
             } else {
-                DeviceAddressDialog dlg = new DeviceAddressDialog(wallet, addressDescriptor);
+                DeviceDisplayAddressDialog dlg = new DeviceDisplayAddressDialog(wallet, addressDescriptor);
                 dlg.showAndWait();
             }
         }

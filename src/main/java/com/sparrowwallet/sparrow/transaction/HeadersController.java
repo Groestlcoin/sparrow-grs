@@ -12,10 +12,12 @@ import com.sparrowwallet.drongo.wallet.*;
 import com.sparrowwallet.hummingbird.registry.CryptoPSBT;
 import com.sparrowwallet.sparrow.AppServices;
 import com.sparrowwallet.sparrow.EventManager;
+import com.sparrowwallet.sparrow.UnitFormat;
 import com.sparrowwallet.sparrow.control.*;
 import com.sparrowwallet.sparrow.event.*;
 import com.sparrowwallet.sparrow.glyphfont.FontAwesome5;
 import com.sparrowwallet.sparrow.glyphfont.FontAwesome5Brands;
+import com.sparrowwallet.sparrow.io.Config;
 import com.sparrowwallet.sparrow.io.Device;
 import com.sparrowwallet.sparrow.net.ElectrumServer;
 import com.sparrowwallet.sparrow.io.Storage;
@@ -59,6 +61,8 @@ import java.text.SimpleDateFormat;
 import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -73,10 +77,20 @@ public class HeadersController extends TransactionFormController implements Init
     public static final String MAX_LOCKTIME_DATE = "2106-02-07T06:28:15Z";
     public static final String MIN_LOCKTIME_DATE = "1985-11-05T00:53:20Z";
 
+    private static final Pattern MIN_MEMPOOL_FEE = Pattern.compile("the transaction was rejected by network rules.*mempool min fee not met, (\\d+) < (\\d+).*", Pattern.DOTALL | Pattern.MULTILINE);
+    private static final Pattern RBF_INSUFFICIENT_FEE = Pattern.compile("insufficient fee, rejecting replacement.*?(\\d+\\.?\\d*) < (\\d+\\.?\\d*)");
+    private static final Pattern RBF_INSUFFICIENT_FEE_RATE = Pattern.compile("insufficient fee, rejecting replacement.*new feerate (\\d+\\.?\\d*)[^\\d]*(\\d+\\.?\\d*)[^\\d]*");
+
     private HeadersForm headersForm;
 
     @FXML
     private IdLabel id;
+
+    @FXML
+    private ToggleButton copyTxid;
+
+    @FXML
+    private ToggleButton openBlockExplorer;
 
     @FXML
     private TransactionDiagram transactionDiagram;
@@ -221,7 +235,7 @@ public class HeadersController extends TransactionFormController implements Init
 
     private ElectrumServer.TransactionMempoolService transactionMempoolService;
 
-    private final Map<Integer, String> outputIndexLabels = new HashMap<>();
+    private final Map<Integer, String> outputIndexLabels = new TreeMap<>();
 
     @Override
     public void initialize(URL location, ResourceBundle resources) {
@@ -754,8 +768,13 @@ public class HeadersController extends TransactionFormController implements Init
         Optional<Keystore> softwareKeystore = signingWallet.getKeystores().stream().filter(keystore -> keystore.getSource().equals(KeystoreSource.SW_SEED)).findAny();
         Optional<Keystore> usbKeystore = signingWallet.getKeystores().stream().filter(keystore -> keystore.getSource().equals(KeystoreSource.HW_USB) || keystore.getSource().equals(KeystoreSource.SW_WATCH)).findAny();
         Optional<Keystore> bip47Keystore = signingWallet.getKeystores().stream().filter(keystore -> keystore.getSource().equals(KeystoreSource.SW_PAYMENT_CODE)).findAny();
-        if(softwareKeystore.isEmpty() && usbKeystore.isEmpty() && bip47Keystore.isEmpty()) {
+        Optional<Keystore> cardKeystore = signingWallet.getKeystores().stream().filter(keystore -> keystore.getWalletModel().isCard()).findAny();
+        if(softwareKeystore.isEmpty() && usbKeystore.isEmpty() && bip47Keystore.isEmpty() && cardKeystore.isEmpty()) {
             signButton.setDisable(true);
+        } else if(softwareKeystore.isEmpty() && bip47Keystore.isEmpty() && usbKeystore.isEmpty()) {
+            Glyph tapGlyph = new Glyph(FontAwesome5.FONT_NAME, FontAwesome5.Glyph.WIFI);
+            tapGlyph.setFontSize(20);
+            signButton.setGraphic(tapGlyph);
         } else if(softwareKeystore.isEmpty() && bip47Keystore.isEmpty()) {
             Glyph usbGlyph = new Glyph(FontAwesome5Brands.FONT_NAME, FontAwesome5Brands.Glyph.USB);
             usbGlyph.setFontSize(20);
@@ -801,11 +820,13 @@ public class HeadersController extends TransactionFormController implements Init
             addStyleClass(size, UNFINALIZED_TXID_CLASS);
             addStyleClass(virtualSize, UNFINALIZED_TXID_CLASS);
             addStyleClass(feeRate, UNFINALIZED_TXID_CLASS);
+            openBlockExplorer.setDisable(true);
         } else {
             id.getStyleClass().remove(UNFINALIZED_TXID_CLASS);
             size.getStyleClass().remove(UNFINALIZED_TXID_CLASS);
             virtualSize.getStyleClass().remove(UNFINALIZED_TXID_CLASS);
             feeRate.getStyleClass().remove(UNFINALIZED_TXID_CLASS);
+            openBlockExplorer.setDisable(Config.get().isBlockExplorerDisabled());
         }
     }
 
@@ -816,9 +837,16 @@ public class HeadersController extends TransactionFormController implements Init
     }
 
     public void copyId(ActionEvent event) {
+        copyTxid.setSelected(false);
         ClipboardContent content = new ClipboardContent();
         content.putString(headersForm.getTransaction().calculateTxId(false).toString());
         Clipboard.getSystemClipboard().setContent(content);
+    }
+
+    public void openInBlockExplorer(ActionEvent event) {
+        openBlockExplorer.setSelected(false);
+        String txid = headersForm.getTransaction().calculateTxId(false).toString();
+        AppServices.openBlockExplorer(txid);
     }
 
     public void setLocktimeToCurrentHeight(ActionEvent event) {
@@ -843,7 +871,9 @@ public class HeadersController extends TransactionFormController implements Init
         //TODO: Remove once Cobo Vault has upgraded to UR2.0
         boolean addLegacyEncodingOption = headersForm.getSigningWallet().getKeystores().stream().anyMatch(keystore -> keystore.getWalletModel().equals(WalletModel.COBO_VAULT));
 
-        CryptoPSBT cryptoPSBT = new CryptoPSBT(headersForm.getPsbt().serialize());
+        //Don't include non witness utxo fields for segwit wallets when displaying the PSBT as a QR - it can add greatly to the time required for scanning
+        boolean includeNonWitnessUtxos = !Arrays.asList(ScriptType.WITNESS_TYPES).contains(headersForm.getSigningWallet().getScriptType());
+        CryptoPSBT cryptoPSBT = new CryptoPSBT(headersForm.getPsbt().serialize(true, includeNonWitnessUtxos));
         QRDisplayDialog qrDisplayDialog = new QRDisplayDialog(cryptoPSBT.toUR(), addLegacyEncodingOption);
         qrDisplayDialog.show();
     }
@@ -935,7 +965,7 @@ public class HeadersController extends TransactionFormController implements Init
 
     public void signPSBT(ActionEvent event) {
         signSoftwareKeystores();
-        signUsbKeystores();
+        signDeviceKeystores();
     }
 
     private void signSoftwareKeystores() {
@@ -982,7 +1012,7 @@ public class HeadersController extends TransactionFormController implements Init
         }
     }
 
-    private void signUsbKeystores() {
+    private void signDeviceKeystores() {
         if(headersForm.getPsbt().isSigned()) {
             return;
         }
@@ -990,12 +1020,12 @@ public class HeadersController extends TransactionFormController implements Init
         List<String> fingerprints = headersForm.getSigningWallet().getKeystores().stream().map(keystore -> keystore.getKeyDerivation().getMasterFingerprint()).collect(Collectors.toList());
         List<Device> signingDevices = AppServices.getDevices().stream().filter(device -> fingerprints.contains(device.getFingerprint())).collect(Collectors.toList());
         if(signingDevices.isEmpty() &&
-                (headersForm.getSigningWallet().getKeystores().stream().noneMatch(keystore -> keystore.getSource().equals(KeystoreSource.HW_USB) || keystore.getSource().equals(KeystoreSource.SW_WATCH)) ||
+                (headersForm.getSigningWallet().getKeystores().stream().noneMatch(keystore -> keystore.getSource().equals(KeystoreSource.HW_USB) || keystore.getSource().equals(KeystoreSource.SW_WATCH) || keystore.getWalletModel().isCard()) ||
                         (headersForm.getSigningWallet().getKeystores().stream().anyMatch(keystore -> keystore.getSource().equals(KeystoreSource.SW_SEED)) && headersForm.getSigningWallet().getKeystores().stream().anyMatch(keystore -> keystore.getSource().equals(KeystoreSource.SW_WATCH))))) {
             return;
         }
 
-        DeviceSignDialog dlg = new DeviceSignDialog(fingerprints, headersForm.getPsbt());
+        DeviceSignDialog dlg = new DeviceSignDialog(headersForm.getSigningWallet(), fingerprints, headersForm.getPsbt());
         dlg.initModality(Modality.NONE);
         Stage stage = (Stage)dlg.getDialogPane().getScene().getWindow();
         stage.setAlwaysOnTop(true);
@@ -1115,12 +1145,35 @@ public class HeadersController extends TransactionFormController implements Init
                 failMessage = workerStateEvent.getSource().getException().getMessage();
             }
 
+            UnitFormat format = Config.get().getUnitFormat() == null ? UnitFormat.DOT : Config.get().getUnitFormat();
             if(failMessage.startsWith("min relay fee not met")) {
-                AppServices.showErrorDialog("Error broadcasting transaction", "The fee rate for the signed transaction is below the minimum " + AppServices.getMinimumRelayFeeRate() + " sats/vB. " +
+                AppServices.showErrorDialog("Error broadcasting transaction", "The fee rate for the signed transaction is below the minimum " + format.getCurrencyFormat().format(AppServices.getMinimumRelayFeeRate()) + " gros/vB. " +
                         "This usually happens because a keystore has created a signature that is larger than necessary.\n\n" +
                         "You can solve this by recreating the transaction with a slightly increased fee rate.");
             } else if(failMessage.startsWith("bad-txns-inputs-missingorspent")) {
                 AppServices.showErrorDialog("Error broadcasting transaction", "The server returned an error indicating some or all of the UTXOs this transaction is spending are missing or have already been spent.");
+            } else if(failMessage.contains("mempool min fee not met")) {
+                Matcher minMempoolMatcher = MIN_MEMPOOL_FEE.matcher(failMessage);
+                if(minMempoolMatcher.matches()) {
+                    long requiredFee = Long.parseLong(minMempoolMatcher.group(2));
+                    AppServices.showErrorDialog("Error broadcasting transaction", "The fee for the transaction was insufficient for relay by your connected server. Increase the fee to at least " + requiredFee + " gros to try again.");
+                } else {
+                    AppServices.showErrorDialog("Error broadcasting transaction", "The fee for the transaction was insufficient for relay by your connected server. Increase the fee to try again.");
+                }
+            } else if(failMessage.startsWith("insufficient fee, rejecting replacement")) {
+                Matcher feeMatcher = RBF_INSUFFICIENT_FEE.matcher(failMessage);
+                Matcher feeRateMatcher = RBF_INSUFFICIENT_FEE_RATE.matcher(failMessage);
+                if(feeMatcher.matches() && fee.getValue() > 0) {
+                    long currentAdditionalFee = (long)(Double.parseDouble(feeMatcher.group(1)) * Transaction.SATOSHIS_PER_BITCOIN);
+                    long requiredAdditionalFee = (long)(Double.parseDouble(feeMatcher.group(2)) * Transaction.SATOSHIS_PER_BITCOIN);
+                    long requiredFee = fee.getValue() - currentAdditionalFee + requiredAdditionalFee;
+                    AppServices.showErrorDialog("Error broadcasting transaction", "The fee for the replacement transaction was insufficient. Increase the fee to at least " + requiredFee + " gros to try again.");
+                } else if(feeRateMatcher.matches()) {
+                    double requiredFeeRate = Double.parseDouble(feeRateMatcher.group(2)) * Transaction.SATOSHIS_PER_BITCOIN / 1000;
+                    AppServices.showErrorDialog("Error broadcasting transaction", "The fee rate for the replacement transaction was insufficient. Increase the fee rate to at least " + format.getCurrencyFormat().format(requiredFeeRate) + " gros/vB to try again.");
+                } else {
+                    AppServices.showErrorDialog("Error broadcasting transaction", "The fee for the replacement transaction was insufficient. Increase the fee to try again.");
+                }
             } else {
                 AppServices.showErrorDialog("Error broadcasting transaction", "The server returned an error when broadcasting the transaction. The server response is contained in the log (See Help > Show Log File).");
             }
@@ -1449,7 +1502,20 @@ public class HeadersController extends TransactionFormController implements Init
             List<Entry> changedLabelEntries = new ArrayList<>();
             BlockTransaction blockTransaction = event.getWallet().getWalletTransaction(txid);
             if(blockTransaction != null && blockTransaction.getLabel() == null) {
-                blockTransaction.setLabel(headersForm.getName());
+                String name = headersForm.getName();
+                if(outputIndexLabels.size() > 1) {
+                    StringJoiner joiner = new StringJoiner(", ");
+                    outputIndexLabels.values().forEach(joiner::add);
+                    name = joiner.toString();
+
+                    Matcher matcher = EntryCell.REPLACED_BY_FEE_SUFFIX.matcher(name);
+                    name = matcher.replaceAll("$1");
+                    matcher.reset();
+                    if(matcher.find()) {
+                        name += matcher.group(2);
+                    }
+                }
+                blockTransaction.setLabel(name != null && name.length() > 255 ? name.substring(0, 255) : name);
                 changedLabelEntries.add(new TransactionEntry(event.getWallet(), blockTransaction, Collections.emptyMap(), Collections.emptyMap()));
             }
 

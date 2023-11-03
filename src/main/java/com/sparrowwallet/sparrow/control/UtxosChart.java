@@ -91,7 +91,7 @@ public class UtxosChart extends BarChart<String, Number> {
         Tooltip.uninstall(item.getNode(), null);
 
         String satsValue = String.format(Locale.ENGLISH, "%,d", item.getYValue());
-        Tooltip tooltip = new Tooltip(item.getXValue() + "\n" + satsValue + " sats");
+        Tooltip tooltip = new Tooltip(item.getXValue() + "\n" + satsValue + " gros");
         tooltip.setShowDelay(Duration.millis(TOOLTIP_SHOW_DELAY));
         Tooltip.install(item.getNode(), tooltip);
     }

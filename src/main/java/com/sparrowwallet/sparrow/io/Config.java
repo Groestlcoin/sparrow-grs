@@ -30,6 +30,7 @@ public class Config {
     private Mode mode;
     private BitcoinUnit bitcoinUnit;
     private UnitFormat unitFormat;
+    private BlockExplorer blockExplorer;
     private FeeRatesSource feeRatesSource;
     private FeeRatesSelection feeRatesSelection;
     private OptimizationStrategy sendOptimizationStrategy;
@@ -48,6 +49,7 @@ public class Config {
     private boolean showLoadingLog = true;
     private boolean showAddressTransactionCount = false;
     private boolean showDeprecatedImportExport = false;
+    private boolean signBsmsExports = false;
     private boolean preventSleep = false;
     private List<File> recentWalletFiles;
     private Integer keyDerivationPeriod;
@@ -56,6 +58,7 @@ public class Config {
     private int enumerateHwPeriod = ENUMERATE_HW_PERIOD_SECS;
     private QRDensity qrDensity;
     private Boolean hdCapture;
+    private boolean useZbar = true;
     private String webcamDevice;
     private ServerType serverType;
     private Server publicElectrumServer;
@@ -70,10 +73,12 @@ public class Config {
     private File electrumServerCert;
     private boolean useProxy;
     private String proxyServer;
+    private boolean autoSwitchProxy = true;
     private int maxServerTimeout = DEFAULT_MAX_TIMEOUT;
     private int maxPageSize = DEFAULT_PAGE_SIZE;
     private boolean usePayNym;
     private boolean sameAppMixing;
+    private boolean mempoolFullRbf;
     private Double appWidth;
     private Double appHeight;
 
@@ -145,6 +150,19 @@ public class Config {
 
     public void setUnitFormat(UnitFormat unitFormat) {
         this.unitFormat = unitFormat;
+        flush();
+    }
+
+    public boolean isBlockExplorerDisabled() {
+        return BlockExplorer.NONE.getServer().equals(blockExplorer);
+    }
+
+    public BlockExplorer getBlockExplorer() {
+        return blockExplorer;
+    }
+
+    public void setBlockExplorer(BlockExplorer blockExplorer) {
+        this.blockExplorer = blockExplorer;
         flush();
     }
 
@@ -314,6 +332,15 @@ public class Config {
         flush();
     }
 
+    public boolean isSignBsmsExports() {
+        return signBsmsExports;
+    }
+
+    public void setSignBsmsExports(boolean signBsmsExports) {
+        this.signBsmsExports = signBsmsExports;
+        flush();
+    }
+
     public boolean isPreventSleep() {
         return preventSleep;
     }
@@ -377,6 +404,10 @@ public class Config {
     public void setHdCapture(Boolean hdCapture) {
         this.hdCapture = hdCapture;
         flush();
+    }
+
+    public boolean isUseZbar() {
+        return useZbar;
     }
 
     public String getWebcamDevice() {
@@ -605,6 +636,15 @@ public class Config {
         flush();
     }
 
+    public boolean isAutoSwitchProxy() {
+        return autoSwitchProxy;
+    }
+
+    public void setAutoSwitchProxy(boolean autoSwitchProxy) {
+        this.autoSwitchProxy = autoSwitchProxy;
+        flush();
+    }
+
     public int getMaxServerTimeout() {
         return maxServerTimeout;
     }
@@ -628,6 +668,15 @@ public class Config {
 
     public void setSameAppMixing(boolean sameAppMixing) {
         this.sameAppMixing = sameAppMixing;
+        flush();
+    }
+
+    public boolean isMempoolFullRbf() {
+        return mempoolFullRbf;
+    }
+
+    public void setMempoolFullRbf(boolean mempoolFullRbf) {
+        this.mempoolFullRbf = mempoolFullRbf;
         flush();
     }
 

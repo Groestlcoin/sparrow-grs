@@ -16,6 +16,7 @@ import com.sparrowwallet.drongo.protocol.Transaction;
 import com.sparrowwallet.drongo.psbt.PSBT;
 import com.sparrowwallet.drongo.psbt.PSBTParseException;
 import com.sparrowwallet.drongo.uri.BitcoinURI;
+import com.sparrowwallet.drongo.wallet.Bip39MnemonicCode;
 import com.sparrowwallet.drongo.wallet.DeterministicSeed;
 import com.sparrowwallet.drongo.wallet.SeedQR;
 import com.sparrowwallet.drongo.wallet.Wallet;
@@ -24,6 +25,8 @@ import com.sparrowwallet.hummingbird.registry.*;
 import com.sparrowwallet.hummingbird.ResultType;
 import com.sparrowwallet.hummingbird.UR;
 import com.sparrowwallet.hummingbird.URDecoder;
+import com.sparrowwallet.hummingbird.registry.pathcomponent.IndexPathComponent;
+import com.sparrowwallet.hummingbird.registry.pathcomponent.PathComponent;
 import com.sparrowwallet.sparrow.AppServices;
 import com.sparrowwallet.sparrow.glyphfont.FontAwesome5;
 import com.sparrowwallet.sparrow.io.Config;
@@ -53,6 +56,7 @@ import java.util.*;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 @SuppressWarnings("deprecation")
@@ -206,6 +210,7 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
                         URDecoder.Result urResult = decoder.getResult();
                         if(urResult.type == ResultType.SUCCESS) {
                             result = extractResultFromUR(urResult.ur);
+                            Platform.runLater(() -> setResult(result));
                         } else {
                             result = new Result(new URException(urResult.error));
                         }
@@ -259,7 +264,7 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
                 DeterministicSeed seed;
                 try {
                     extendedKey = ExtendedKey.fromDescriptor(qrtext);
-                    result = new Result(extendedKey);
+                    result = new Result(extendedKey, null);
                     return;
                 } catch(Exception e) {
                     //Ignore, not a valid xpub
@@ -350,6 +355,17 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
                     //Ignore, not parseable as a CompactSeedQR
                 }
 
+                try {
+                    List<String> words = Arrays.asList(qrtext.split(" "));
+                    if(words.size() == 12 || words.size() == 15 || words.size() == 18 || words.size() == 21 || words.size() == 24) {
+                        Bip39MnemonicCode.INSTANCE.check(words);
+                        result = new Result(new DeterministicSeed(words, null, System.currentTimeMillis(), DeterministicSeed.Type.BIP39));
+                        return;
+                    }
+                } catch(Exception e) {
+                    //Ignore, not parseable as BIP39 seed words
+                }
+
                 result = new Result(qrtext);
             }
         }
@@ -408,7 +424,7 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
                 } else if(urRegistryType.equals(RegistryType.CRYPTO_HDKEY)) {
                     CryptoHDKey cryptoHDKey = (CryptoHDKey)ur.decodeFromRegistry();
                     ExtendedKey extendedKey = getExtendedKey(cryptoHDKey);
-                    return new Result(extendedKey);
+                    return new Result(extendedKey, cryptoHDKey.getName());
                 } else if(urRegistryType.equals(RegistryType.CRYPTO_OUTPUT)) {
                     CryptoOutput cryptoOutput = (CryptoOutput)ur.decodeFromRegistry();
                     OutputDescriptor outputDescriptor = getOutputDescriptor(cryptoOutput);
@@ -466,7 +482,9 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
                 if(cryptoHDKey.getOrigin() != null) {
                     if(!cryptoHDKey.getOrigin().getComponents().isEmpty()) {
                         PathComponent lastComponent = cryptoHDKey.getOrigin().getComponents().get(cryptoHDKey.getOrigin().getComponents().size() - 1);
-                        lastChild = new ChildNumber(lastComponent.getIndex(), lastComponent.isHardened());
+                        if(lastComponent instanceof IndexPathComponent indexPathComponent) {
+                            lastChild = new ChildNumber(indexPathComponent.getIndex(), indexPathComponent.isHardened());
+                        }
                         depth = cryptoHDKey.getOrigin().getComponents().size();
                     }
                     if(cryptoHDKey.getParentFingerprint() != null) {
@@ -542,7 +560,13 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
 
         private KeyDerivation getKeyDerivation(CryptoKeypath cryptoKeypath) {
             if(cryptoKeypath != null) {
-                return new KeyDerivation(Utils.bytesToHex(cryptoKeypath.getSourceFingerprint()), cryptoKeypath.getPath());
+                if(!cryptoKeypath.getComponents().stream().allMatch(pathComponent -> pathComponent instanceof IndexPathComponent)) {
+                    throw new IllegalArgumentException("Only indexed derivation path components are supported");
+                }
+
+                List<ChildNumber> path = cryptoKeypath.getComponents().stream().map(comp -> (IndexPathComponent)comp)
+                        .map(comp -> new ChildNumber(comp.getIndex(), comp.isHardened())).collect(Collectors.toList());
+                return new KeyDerivation(Utils.bytesToHex(cryptoKeypath.getSourceFingerprint()), KeyDerivation.writePath(path));
             }
 
             return null;
@@ -656,6 +680,7 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
         public final PSBT psbt;
         public final BitcoinURI uri;
         public final ExtendedKey extendedKey;
+        public final String extendedKeyName;
         public final OutputDescriptor outputDescriptor;
         public final List<Wallet> wallets;
         public final DeterministicSeed seed;
@@ -667,6 +692,7 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
             this.psbt = null;
             this.uri = null;
             this.extendedKey = null;
+            this.extendedKeyName = null;
             this.outputDescriptor = null;
             this.wallets = null;
             this.seed = null;
@@ -679,6 +705,7 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
             this.psbt = psbt;
             this.uri = null;
             this.extendedKey = null;
+            this.extendedKeyName = null;
             this.outputDescriptor = null;
             this.wallets = null;
             this.seed = null;
@@ -691,6 +718,7 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
             this.psbt = null;
             this.uri = uri;
             this.extendedKey = null;
+            this.extendedKeyName = null;
             this.outputDescriptor = null;
             this.wallets = null;
             this.seed = null;
@@ -703,6 +731,7 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
             this.psbt = null;
             this.uri = BitcoinURI.fromAddress(address);
             this.extendedKey = null;
+            this.extendedKeyName = null;
             this.outputDescriptor = null;
             this.wallets = null;
             this.seed = null;
@@ -710,11 +739,12 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
             this.exception = null;
         }
 
-        public Result(ExtendedKey extendedKey) {
+        public Result(ExtendedKey extendedKey, String name) {
             this.transaction = null;
             this.psbt = null;
             this.uri = null;
             this.extendedKey = extendedKey;
+            this.extendedKeyName = name;
             this.outputDescriptor = null;
             this.wallets = null;
             this.seed = null;
@@ -727,6 +757,7 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
             this.psbt = null;
             this.uri = null;
             this.extendedKey = null;
+            this.extendedKeyName = null;
             this.outputDescriptor = outputDescriptor;
             this.wallets = null;
             this.seed = null;
@@ -739,6 +770,7 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
             this.psbt = null;
             this.uri = null;
             this.extendedKey = null;
+            this.extendedKeyName = null;
             this.outputDescriptor = null;
             this.wallets = wallets;
             this.seed = null;
@@ -751,6 +783,7 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
             this.psbt = null;
             this.uri = null;
             this.extendedKey = null;
+            this.extendedKeyName = null;
             this.outputDescriptor = null;
             this.wallets = null;
             this.seed = seed;
@@ -763,6 +796,7 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
             this.psbt = null;
             this.uri = null;
             this.extendedKey = null;
+            this.extendedKeyName = null;
             this.outputDescriptor = null;
             this.wallets = null;
             this.seed = null;
@@ -775,6 +809,7 @@ public class QRScanDialog extends Dialog<QRScanDialog.Result> {
             this.psbt = null;
             this.uri = null;
             this.extendedKey = null;
+            this.extendedKeyName = null;
             this.outputDescriptor = null;
             this.wallets = null;
             this.seed = null;

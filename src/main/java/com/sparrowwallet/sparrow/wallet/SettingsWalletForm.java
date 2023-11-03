@@ -242,4 +242,19 @@ public class SettingsWalletForm extends WalletForm {
 
         return changedKeystores;
     }
+
+    public void childWalletSaved(Wallet childWallet) {
+        //Update the child wallets for the master wallet of the local walletCopy to ensure all KeystoreEncryptionChangedEvents are posted
+        Wallet masterWalletCopy = walletCopy.isMasterWallet() ? walletCopy : walletCopy.getMasterWallet();
+        Wallet childWalletCopy = masterWalletCopy.getChildWallet(childWallet.getName());
+        if(childWalletCopy == null) {
+            childWalletCopy = childWallet.copy();
+            childWalletCopy.setMasterWallet(masterWalletCopy);
+            masterWalletCopy.getChildWallets().add(childWallet.copy());
+        }
+    }
+
+    public void gapLimitChanged(int gapLimit) {
+        walletCopy.setGapLimit(gapLimit);
+    }
 }

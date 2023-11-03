@@ -441,6 +441,7 @@ public class PayNymController {
             if(!storage.isPersisted(addedWallet)) {
                 try {
                     storage.saveWallet(addedWallet);
+                    EventManager.get().post(new NewChildWalletSavedEvent(storage, masterWallet, addedWallet));
                 } catch(Exception e) {
                     log.error("Error saving wallet", e);
                     AppServices.showErrorDialog("Error saving wallet " + addedWallet.getName(), e.getMessage());
@@ -457,14 +458,14 @@ public class PayNymController {
         ButtonType sendType = new ButtonType("Send", ButtonBar.ButtonData.YES);
         Optional<ButtonType> optButtonType = AppServices.showAlertDialog("Link PayNym?",
                 "Linking to this contact will allow you to send to it directly (non-collaboratively) through unique private addresses you can generate independently.\n\n" +
-                "It will cost " + MINIMUM_P2PKH_OUTPUT_SATS + " sats to create the link through a notification transaction, plus the mining fee. Send transaction?", Alert.AlertType.CONFIRMATION, previewType, ButtonType.CANCEL, sendType);
+                "It will cost " + MINIMUM_P2PKH_OUTPUT_SATS + " gros to create the link through a notification transaction, plus the mining fee. Send transaction?", Alert.AlertType.CONFIRMATION, previewType, ButtonType.CANCEL, sendType);
         if(optButtonType.isPresent() && optButtonType.get() == sendType) {
             broadcastNotificationTransaction(payNym);
         } else if(optButtonType.isPresent() && optButtonType.get() == previewType) {
             PaymentCode paymentCode = payNym.paymentCode();
             Payment payment = new Payment(paymentCode.getNotificationAddress(), "Link " + payNym.nymName(), MINIMUM_P2PKH_OUTPUT_SATS, false);
             Wallet wallet = AppServices.get().getWallet(walletId);
-            EventManager.get().post(new SendActionEvent(wallet, new ArrayList<>(wallet.getWalletUtxos().keySet())));
+            EventManager.get().post(new SendActionEvent(wallet, new ArrayList<>(wallet.getSpendableUtxos().keySet())));
             Platform.runLater(() -> EventManager.get().post(new SpendUtxoEvent(wallet, List.of(payment), List.of(new byte[80]), paymentCode)));
             closeProperty.set(true);
         } else {
@@ -603,10 +604,10 @@ public class PayNymController {
         boolean includeMempoolOutputs = Config.get().isIncludeMempoolOutputs();
 
         long noInputsFee = getMasterWallet().getNoInputsFee(payments, feeRate);
-        List<UtxoSelector> utxoSelectors = List.of(utxos == null ? new KnapsackUtxoSelector(noInputsFee) : new PresetUtxoSelector(utxos, true));
-        List<UtxoFilter> utxoFilters = List.of(new FrozenUtxoFilter(), new CoinbaseUtxoFilter(wallet));
+        List<UtxoSelector> utxoSelectors = List.of(utxos == null ? new KnapsackUtxoSelector(noInputsFee) : new PresetUtxoSelector(utxos, true, false));
+        List<TxoFilter> txoFilters = List.of(new SpentTxoFilter(), new FrozenTxoFilter(), new CoinbaseTxoFilter(wallet));
 
-        return wallet.createWalletTransaction(utxoSelectors, utxoFilters, payments, opReturns, Collections.emptySet(), feeRate, minimumFeeRate, null, AppServices.getCurrentBlockHeight(), groupByAddress, includeMempoolOutputs, false);
+        return wallet.createWalletTransaction(utxoSelectors, txoFilters, payments, opReturns, Collections.emptySet(), feeRate, minimumFeeRate, null, AppServices.getCurrentBlockHeight(), groupByAddress, includeMempoolOutputs);
     }
 
     private Map<BlockTransaction, WalletNode> getNotificationTransaction(PaymentCode externalPaymentCode) {
